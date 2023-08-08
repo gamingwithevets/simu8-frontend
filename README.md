@@ -6,10 +6,9 @@ Currently, LifeEmu's emulator is unfinished, therefore the frontend may look lik
 Because SimU8 was written in C and this frontend was written in Python, a **shared library** is needed to use the frontend.
 That's not really a big deal, however I thought I should mention it, as C compilers are usually used for compiling binaries and not shared libraries.
 
-1. Clone the **`drivers`** branch of the SimU8 repository:
+1. Clone the SimU8 repository:
 ```
 git clone https://github.com/SimU8.git
-git checkout drivers
 ```
 If you don't have `git` installed you can just download a ZIP file and extract it.
 

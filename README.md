@@ -11,13 +11,15 @@ That's not really a big deal, however I thought I should mention it, as C compil
 git clone https://github.com/SimU8.git
 git checkout drivers
 ```
-If you don't have `git` installed you can just download a ZIP file and extract it.  
+If you don't have `git` installed you can just download a ZIP file and extract it.
+
 2. Place yourself in the root of the SimU8 repo and run:
 ```
 gcc src/core.c src/mmu.c -O3 -fPIC -shared -o simu8.so
 ```
 On Windows you can use `gcc` on MingW or Cygwin.  
-If no errors appear, a `simu8.so` file should appear.  
+If no errors appear, a `simu8.so` file should appear.
+
 3. Now clone this repository:
 ```
 git clone https://github.com/gamingwithevets/simu8-frontend.git

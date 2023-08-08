@@ -25,3 +25,8 @@ git clone https://github.com/gamingwithevets/simu8-frontend.git
 ```
 4. Edit the `config.py` file as needed.
 5. Run `python main.py` (or `python3 main.py`) and you're done.
+
+# Images
+This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).
+- For the interface, you need to extract bitmap **3001** from the emulator **DLL**.
+- For the status bar, you need to extract bitmap **135** from the emulator **EXE**.

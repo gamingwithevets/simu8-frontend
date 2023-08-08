@@ -4,7 +4,7 @@
 shared_lib = 'simu8.so'
 
 # Path to the ROM file.
-rom_file = 'out.bin'
+rom_file = 'rom.bin'
 
 # Path to the status bar image.
 status_bar_path = 'images/interface_es_bar.png'

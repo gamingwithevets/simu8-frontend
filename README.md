@@ -1,4 +1,4 @@
-This is a **frontend** for [LifeEmu](https://github.com/LifeEmu)'s [SimU8](https://github.com/SimU8) emulator written in Python. It's a very simple Tkinter window with Pygame embedded into it.
+This is a **frontend** for [LifeEmu](https://github.com/LifeEmu)'s [SimU8](https://github.com/LifeEmu/SimU8) emulator written in Python. It's a very simple Tkinter window with Pygame embedded into it.
 
 Currently, LifeEmu's emulator is unfinished, therefore the frontend may look like it isn't working properly. However, the screen **has been tested and verified to be working** via direct memory editing.
 

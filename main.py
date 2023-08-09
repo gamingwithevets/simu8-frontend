@@ -35,7 +35,7 @@ status_bar_rect = status_bar.get_rect()
 
 ret_val = simu8.memoryInit(ctypes.c_char_p(rom_file.encode()), None)
 if ret_val == 2: raise MemoryError('Unable to allocate RAM for emulated memory.')
-elif ret_val == 3: raise FileNotFoundError(f'Cannot open ROM file {rom_file}. Please check the settings in config.py.')
+elif ret_val == 3: raise FileNotFoundError(f'Cannot open the ROM file {rom_file}. If the file exists, please check the settings in config.py.')
 
 data_mem = ctypes.c_void_p.in_dll(simu8, 'DataMemory').value
 

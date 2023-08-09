@@ -6,6 +6,15 @@ import tkinter as tk
 
 from config import *
 
+class data_t(ctypes.Union):
+	_fields_ = [
+	('raw', ctypes.c_ulonglong),
+	('qword', ctypes.c_ulonglong),
+	('dword', ctypes.c_uint),
+	('word', ctypes.c_ushort),
+	('byte', ctypes.c_ubyte),
+	]
+
 import platform
 if sys.version_info < (3, 6, 0, 'alpha', 4):
 	print(f'This program requires at least Python 3.6.0a4. (You are running Python {platform.python_version()})')
@@ -37,11 +46,33 @@ ret_val = simu8.memoryInit(ctypes.c_char_p(rom_file.encode()), None)
 if ret_val == 2: raise MemoryError('Unable to allocate RAM for emulated memory.')
 elif ret_val == 3: raise FileNotFoundError(f'Cannot open the ROM file {rom_file}. If the file exists, please check the settings in config.py.')
 
-data_mem = ctypes.c_void_p.in_dll(simu8, 'DataMemory').value
 
-def read_mem(addr, num_bytes):
-	global data_mem
-	return bytes((ctypes.c_ubyte*num_bytes).from_address(data_mem + addr - rom_window_size))
+def split_num(num):
+	if num <= 0: return []
+
+	result = []
+	for i in (8, 4, 2, 1):
+		while num >= i:
+			result.append(i)
+			num -= i
+
+	return result
+
+def read_dmem(addr, num_bytes, segment = 0):
+	data = b''
+	bytes_retrieved = 0
+
+	for i in split_num(num_bytes):
+		simu8.memoryGetData(ctypes.c_ubyte(segment), ctypes.c_ushort(addr + bytes_retrieved), ctypes.c_size_t(i))
+		dt = data_t.in_dll(simu8, 'DataRaw')
+		if i == 8: dt_ = dt.qword
+		elif i == 4: dt_ = dt.dword
+		elif i == 2: dt_ = dt.word
+		elif i == 1: dt_ = dt.byte
+		data += dt_.to_bytes(i, 'big')
+		bytes_retrieved += i
+
+	return data
 
 def pygame_loop():
 	screen.fill((0, 0, 0))
@@ -59,7 +90,7 @@ def pygame_loop():
 
 	screen.blit(interface, interface_rect)
 
-	scr_bytes = [list(read_mem(0xf000 + i*0x10, 0xc)) for i in range(0x80, 0xa0)]
+	scr_bytes = [list(read_dmem(0xf000 + i*0x10, 0xc)) for i in range(0x80, 0xa0)]
 
 	screen_data_status_bar = [
 	scr_bytes[0][0] & (1 << 4),    # [S]

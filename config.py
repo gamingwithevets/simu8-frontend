@@ -28,6 +28,9 @@ console_bg = '#0c0c0c'
 # "Console" text color.
 console_fg = '#cccccc'
 
+# "Console" text size.
+console_size = 10
+
 # The settings below should work out of the box for ES and ES PLUS ROMs.
 # Only modify if you know what you're doing.
 
@@ -57,4 +60,4 @@ status_bar_crops = (
 rom_window_size = 0x8000
 
 # Show debugging information.
-debug = False
+debug = True

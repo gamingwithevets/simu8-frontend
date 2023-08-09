@@ -63,7 +63,7 @@ embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
 
 if debug:
-	info_label = tk.Label(root, text = 'No text loaded yet.', width = width, height = height, font = ('Consolas', 11), fg = console_fg, bg = console_bg, justify = 'left', anchor = 'nw')
+	info_label = tk.Label(root, text = 'No text loaded yet.', width = width, height = height, font = ('Consolas', console_size), fg = console_fg, bg = console_bg, justify = 'left', anchor = 'nw')
 	info_label.pack(side = 'left')
 
 os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())
@@ -78,7 +78,7 @@ interface = pygame.image.load(interface_path)
 interface_rect = interface.get_rect()
 status_bar = pygame.image.load(status_bar_path)
 status_bar_rect = status_bar.get_rect()
-died_text = pygame.font.SysFont('Consolas', 11).render('Died', True, console_fg)
+died_text = pygame.font.SysFont('Consolas', console_size).render('Died', True, console_fg)
 died_text_rect = died_text.get_rect()
 died_text_rect.center = (width // 2, height // 2)
 

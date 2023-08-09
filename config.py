@@ -13,12 +13,20 @@ status_bar_path = 'images/interface_es_bar.png'
 # Path to the interface image.
 interface_path = 'images/interface_esp_991esp.png'
 
+# Settings for the Tkinter window.
+
 # Width and height of the Pygame embed widget.
 width = 405
 height = 816
 
 # Name of the Tkinter window.
 root_w_name = 'fx-570ES PLUS Emulator'
+
+# "Console" background color.
+console_bg = '#0c0c0c'
+
+# "Console" text color.
+console_fg = '#cccccc'
 
 # The settings below should work out of the box for ES and ES PLUS ROMs.
 # Only modify if you know what you're doing.
@@ -47,3 +55,6 @@ status_bar_crops = (
 
 # Size of the ROM window.
 rom_window_size = 0x8000
+
+# Show debugging information.
+debug = False

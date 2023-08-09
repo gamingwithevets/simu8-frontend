@@ -78,7 +78,7 @@ interface = pygame.image.load(interface_path)
 interface_rect = interface.get_rect()
 status_bar = pygame.image.load(status_bar_path)
 status_bar_rect = status_bar.get_rect()
-died_text = pygame.font.SysFont('Consolas', console_size).render('Died', True, console_fg)
+died_text = pygame.font.SysFont('Consolas', int(console_size * 1.5)).render('Died', True, console_fg)
 died_text_rect = died_text.get_rect()
 died_text_rect.center = (width // 2, height // 2)
 
@@ -132,13 +132,14 @@ def pygame_loop():
 	for event in pygame.event.get():
 		if event.type == pygame.QUIT: exit_sim()
 
-	ret_val = simu8.coreStep()
-
-	if not died and debug:
-		gr = get_var('GR', GR_t)
-		csr = get_var('CSR', ctypes.c_uint8).value
-		pc = get_var('PC', ctypes.c_uint16).value
-		info_label['text'] = f'''\
+	if not died:
+		ret_val = simu8.coreStep()
+		if debug:
+			gr = get_var('GR', GR_t)
+			csr = get_var('CSR', ctypes.c_uint8).value
+			pc = get_var('PC', ctypes.c_uint16).value
+			sp = get_var('SP', ctypes.c_uint16).value
+			info_label['text'] = f'''\
 === REGISTERS ===
 
 General registers:
@@ -148,7 +149,9 @@ QR8 = ''' + ' '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f
 Control registers:
 CSR:PC               {csr:02X}:{pc:04X}H
 Code words @ CSR:PC  {ctypes.c_uint16.from_address(get_var('CodeMemory', ctypes.c_void_p).value + csr*0x10000 + pc).value:04X} {ctypes.c_uint16.from_address(get_var('CodeMemory', ctypes.c_void_p).value + csr*0x10000 + pc + 2).value:04X}
-SP                   {get_var('SP', ctypes.c_uint16).value:04X}H
+SP                   {sp:04X}H
+DWORDs @ SP          ''' + ' '.join(f'{int.from_bytes(read_dmem(sp + i, 4), "big"):08X}' for i in range(0, 8, 4)) + f'''
+({sp:04X}H - {sp + 15:04X}H)      ''' + ' '.join(f'{int.from_bytes(read_dmem(sp + i, 4), "big"):08X}' for i in range(8, 16, 4)) + f'''
 DSR:EA               {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
 PSW                  {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
 
@@ -162,9 +165,11 @@ EPSW1                {get_var('EPSW1', PSW_t).raw:02X}
 EPSW2                {get_var('EPSW2', PSW_t).raw:02X}
 EPSW3                {get_var('EPSW3', PSW_t).raw:02X}
 '''
-	if ret_val == 3: died = True
-	if ret_val == 1: print(f'WARNING: Write to read-only region @ CSR:PC = {get_var("CSR", ctypes.c_uint8).value:02X}:{get_var("PC", ctypes.c_uint16).value:04X}H')
-	if ret_val == 2: print(f'WARNING: Unimplemented instruction skipped @ address {get_var("CSR", ctypes.c_uint8).value:01X}{(get_var("PC", ctypes.c_uint16).value - 2) & 0xffff:04X}H')
+		if ret_val == 3:
+			print('DIED: Illegal instruction found')
+			died = True
+		if ret_val == 1: print(f'WARNING: Write to read-only region @ CSR:PC = {get_var("CSR", ctypes.c_uint8).value:02X}:{get_var("PC", ctypes.c_uint16).value:04X}H')
+		if ret_val == 2: print(f'WARNING: Unimplemented instruction skipped @ address {get_var("CSR", ctypes.c_uint8).value:01X}{(get_var("PC", ctypes.c_uint16).value - 2) & 0xffff:04X}H')
 
 	if not died:
 		screen.blit(interface, interface_rect)

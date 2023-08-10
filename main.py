@@ -264,7 +264,7 @@ EPSW3                {get_var('EPSW3', PSW_t).raw:02X}
 
 		for y in range(31):
 			for x in range(96):
-				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
+				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + (x*3 - 96) % 288, 144 + y*3, 3, 3))
 	else:
 		screen.fill(console_bg)
 		screen.blit(died_text, died_text_rect)

@@ -106,6 +106,7 @@ def set_csr_pc():
 	jump_pc_entry.delete(0, 'end')
 
 ttk.Button(w_jump, text = 'OK', command = set_csr_pc).pack(side = 'bottom')
+w_jump.bind('<Return>', lambda x: set_csr_pc())
 
 rc_menu = tk.Menu(tearoff = 0)
 rc_menu.add_command(label = 'Jump to...', accelerator = 'J', command = w_jump.deiconify)

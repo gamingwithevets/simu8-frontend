@@ -60,4 +60,4 @@ status_bar_crops = (
 rom_window_size = 0x8000
 
 # Show debugging information.
-debug = False
+debug = True

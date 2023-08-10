@@ -59,6 +59,22 @@ root.resizable(False, False)
 root.title(root_w_name)
 root['bg'] = console_bg
 
+w_jump = tk.Toplevel(root)
+w_jump.withdraw()
+w_jump.resizable(False, False)
+w_jump.title('Jump to')
+
+ttk.Label(w_jump, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
+ttk.Button(w_jump, text = 'OK').pack(side = 'bottom')
+
+jump_csr = tk.Frame(w_jump); jump_csr.pack()
+ttk.Label(jump_csr, text = 'CSR').pack(side = 'left')
+jump_csr_entry = ttk.Entry(jump_csr).pack(side = 'right')
+
+jump_pc = tk.Frame(w_jump); jump_pc.pack()
+ttk.Label(jump_pc, text = 'PC').pack(side = 'left')
+jump_pc_entry = ttk.Entry(jump_pc).pack(side = 'right')
+
 embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
 

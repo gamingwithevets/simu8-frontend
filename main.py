@@ -58,6 +58,7 @@ root = tk.Tk()
 root.geometry(f'{width*(2 if debug else 1)}x{height}')
 root.resizable(False, False)
 root.title(root_w_name)
+root.focus_set()
 root['bg'] = console_bg
 
 w_jump = tk.Toplevel(root)

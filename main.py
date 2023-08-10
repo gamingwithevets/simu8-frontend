@@ -1,4 +1,5 @@
 import os
+import ast
 import sys
 import ctypes
 import pygame
@@ -61,19 +62,61 @@ root['bg'] = console_bg
 
 w_jump = tk.Toplevel(root)
 w_jump.withdraw()
+w_jump.geometry('250x100')
 w_jump.resizable(False, False)
 w_jump.title('Jump to')
+w_jump.protocol('WM_DELETE_WINDOW', w_jump.withdraw)
+
+def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
+	max_chars = int(max_chars)
+	act_code = int(act_code)
+	if rang: rang = eval(rang)
+
+	if len(new_str) > max_chars: return False
+
+	if act_code == 1:
+		try: new_value_int = int(new_char, 16)
+		except ValueError: return False
+		if rang and len(new_str) == max_chars and int(new_str, 16) not in rang: return False
+		else: return True
+	else: return True
+vh_reg = w_jump.register(validate_hex)
+
+def get_var(var, typ): return typ.in_dll(simu8, var)
 
 ttk.Label(w_jump, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
-ttk.Button(w_jump, text = 'OK').pack(side = 'bottom')
 
-jump_csr = tk.Frame(w_jump); jump_csr.pack()
+jump_csr = tk.Frame(w_jump); jump_csr.pack(fill = 'x')
 ttk.Label(jump_csr, text = 'CSR').pack(side = 'left')
-jump_csr_entry = ttk.Entry(jump_csr).pack(side = 'right')
+jump_csr_entry = ttk.Entry(jump_csr, validate = 'key', validatecommand = (vh_reg, 1, '%S', '%P', '%d')); jump_csr_entry.pack(side = 'right')
+jump_csr_entry.insert(0, '0')
 
-jump_pc = tk.Frame(w_jump); jump_pc.pack()
+jump_pc = tk.Frame(w_jump); jump_pc.pack(fill = 'x')
 ttk.Label(jump_pc, text = 'PC').pack(side = 'left')
-jump_pc_entry = ttk.Entry(jump_pc).pack(side = 'right')
+jump_pc_entry = ttk.Entry(jump_pc, validate = 'key', validatecommand = (vh_reg, 4, '%S', '%P', '%d', range(0, 0xfffe, 2))); jump_pc_entry.pack(side = 'right')
+
+died = False
+def set_csr_pc():
+	get_var('CSR', ctypes.c_uint8).value = int(jump_csr_entry.get(), 16)
+	get_var('PC', ctypes.c_uint16).value = int(jump_pc_entry.get(), 16)
+	died = False
+	w_jump.withdraw()
+
+	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
+	jump_pc_entry.delete(0, 'end')
+
+ttk.Button(w_jump, text = 'OK', command = set_csr_pc).pack(side = 'bottom')
+
+rc_menu = tk.Menu(tearoff = 0)
+rc_menu.add_command(label = 'Jump to...', accelerator = 'J', command = w_jump.deiconify)
+
+def open_popup(x):
+	try: rc_menu.tk_popup(x.x_root, x.y_root)
+	finally: rc_menu.grab_release()
+
+root.bind('<Button-3>', open_popup)
+root.bind('j', lambda x: w_jump.deiconify())
+root.bind('J', lambda x: w_jump.deiconify())
 
 embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
@@ -88,7 +131,6 @@ pygame.init()
 pygame.display.init()
 screen = pygame.display.set_mode()
 
-died = False
 
 interface = pygame.image.load(interface_path)
 interface_rect = interface.get_rect()
@@ -101,6 +143,7 @@ died_text_rect.center = (width // 2, height // 2)
 ret_val = simu8.memoryInit(ctypes.c_char_p(rom_file.encode()), None)
 if ret_val == 2: raise MemoryError('Unable to allocate RAM for emulated memory.')
 elif ret_val == 3: raise FileNotFoundError(f'Cannot open the ROM file {rom_file}. If the file exists, please check the settings in config.py.')
+
 
 
 def split_num(num):
@@ -130,7 +173,6 @@ def read_dmem(addr, num_bytes, segment = 0):
 
 	return data
 
-def get_var(var, typ): return typ.in_dll(simu8, var)
 
 def exit_sim():
 	simu8.coreReset()
@@ -213,7 +255,7 @@ EPSW3                {get_var('EPSW3', PSW_t).raw:02X}
 		scr_bytes[0][0xb] & (1 << 4),  # Disp
 		]
 
-		screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(7, -1, -1)] for i in range(31)]
+		screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(8)] for i in range(31)]
 
 		for i in range(len(screen_data_status_bar)):
 			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + status_bar_crops[i][0], 132), status_bar_crops[i])

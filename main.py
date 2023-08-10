@@ -255,7 +255,7 @@ EPSW3                {get_var('EPSW3', PSW_t).raw:02X}
 		scr_bytes[0][0xb] & (1 << 4),  # Disp
 		]
 
-		screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(8)] for i in range(31)]
+		screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xb, -1, -1) for k in range(7, -1, -1)] for i in range(31)]
 
 		for i in range(len(screen_data_status_bar)):
 			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + status_bar_crops[i][0], 132), status_bar_crops[i])

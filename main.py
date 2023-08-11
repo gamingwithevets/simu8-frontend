@@ -47,6 +47,35 @@ class PSW_t(ctypes.Union):
 		('field', PSW_t_field),
 	]
 
+# https://stackoverflow.com/a/16198198
+class VerticalScrolledFrame(tk.Frame):
+	def __init__(self, parent, *args, **kw):
+		tk.Frame.__init__(self, parent, *args, **kw)
+
+		vscrollbar = tk.Scrollbar(self, orient = 'vertical')
+		vscrollbar.pack(fill = 'y', side = 'right')
+		canvas = tk.Canvas(self, bd = 0, highlightthickness = 0, yscrollcommand = vscrollbar.set)
+		canvas.pack(side = 'left', fill = 'both', expand = True)
+		vscrollbar.config(command = canvas.yview)
+
+		canvas.xview_moveto(0)
+		canvas.yview_moveto(0)
+
+		self.interior = interior = tk.Frame(canvas)
+		interior_id = canvas.create_window(0, 0, window = interior, anchor = 'nw')
+
+		def _configure_interior(event):
+			size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+			canvas.config(scrollregion = '0 0 %s %s' % size)
+			if interior.winfo_reqwidth() != canvas.winfo_width():
+				canvas.config(width=interior.winfo_reqwidth())
+		interior.bind('<Configure>', _configure_interior)
+
+		def _configure_canvas(event):
+			if interior.winfo_reqwidth() != canvas.winfo_width():
+				canvas.itemconfigure(interior_id, width=canvas.winfo_width())
+		canvas.bind('<Configure>', _configure_canvas)
+
 def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 	max_chars = int(max_chars)
 	act_code = int(act_code)
@@ -94,6 +123,18 @@ def read_cmem(addr, segment = 0):
 	simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
 	return get_var('CodeWord', ctypes.c_uint16).value
 
+def calc_checksum():
+	csum = 0
+	for i in range(0, 0xfffe, 2):
+		cword = read_cmem(i, 8)
+		csum += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
+
+	for i in range(0, 0xfffa, 2):
+		cword = read_cmem(i, 1)
+		csum += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
+
+	tk.messagebox.showinfo('Checksum', f'Expected checksum: {read_cmem(0xfffc, 1):04X}\nCalculated checksum: {csum % 0x10000:04X}')
+
 def set_csr_pc():
 	get_var('CSR', ctypes.c_uint8).value = int(jump_csr_entry.get(), 16)
 	get_var('PC', ctypes.c_uint16).value = int(jump_pc_entry.get(), 16)
@@ -102,6 +143,14 @@ def set_csr_pc():
 
 	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
 	jump_pc_entry.delete(0, 'end')
+
+def show_mem():
+	if not single_step:
+		tk.messagebox.showerror('Single-step mode required', 'This function requires single-step mode.')
+		return
+
+def get_mem():
+	data = 
 
 def set_brkpoint():
 	global brkpoint
@@ -126,10 +175,6 @@ def set_single_step(val):
 	global single_step, info_label
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
-
-def reset_core():
-	simu8.coreReset()
-	print_regs()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
@@ -170,6 +215,10 @@ EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 '''
 
+def reset_core():
+	simu8.coreReset()
+	print_regs()
+
 def exit_sim():
 	simu8.coreReset()
 	simu8.memoryFree()
@@ -200,7 +249,7 @@ w_jump = tk.Toplevel(root)
 w_jump.withdraw()
 w_jump.geometry('250x100')
 w_jump.resizable(False, False)
-w_jump.title('Jump to')
+w_jump.title('Jump to address')
 w_jump.protocol('WM_DELETE_WINDOW', w_jump.withdraw)
 w_jump_vh_reg = w_jump.register(validate_hex)
 ttk.Label(w_jump, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
@@ -234,6 +283,15 @@ ttk.Button(w_brkpoint, text = 'OK', command = set_brkpoint).pack(side = 'bottom'
 w_brkpoint.bind('<Return>', lambda x: set_brkpoint())
 w_brkpoint.bind('<Escape>', lambda x: w_brkpoint.withdraw())
 
+w_data_mem = tk.Toplevel(root)
+w_data_mem.withdraw()
+w_data_mem.geometry('600x600')
+w_data_mem.resizable(False, False)
+w_data_mem.title('Show data memory')
+w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
+segment_cb = ttk.Combobox(w_data_mem)
+segment_cb.pack()
+
 embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
 
@@ -260,11 +318,11 @@ elif ret_val == 3:
 	sys.exit(-1)
 
 single_step = True
-step = True
+step = False
 brkpoint = None
 sp_start = read_cmem(0)
 
-rc_menu = tk.Menu(tearoff = 0)
+rc_menu = tk.Menu(root, tearoff = 0)
 rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
 rc_menu.add_command(label = 'Resume execution', accelerator = 'P', command = lambda: set_single_step(False))
 rc_menu.add_separator()
@@ -274,6 +332,11 @@ rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command =
 rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
+rc_menu.add_separator()
+
+extra_funcs = tk.Menu(rc_menu, tearoff = 0)
+extra_funcs.add_command(label = 'Calculate checksum', command = calc_checksum)
+rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
 
 root.bind('<Button-3>', open_popup)
 root.bind('s', lambda x: set_single_step(True)); root.bind('S', lambda x: set_single_step(True))
@@ -281,7 +344,7 @@ root.bind('p', lambda x: set_single_step(False)); root.bind('P', lambda x: set_s
 root.bind('j', lambda x: w_jump.deiconify()); root.bind('J', lambda x: w_jump.deiconify())
 root.bind('b', lambda x: w_brkpoint.deiconify()); root.bind('B', lambda x: w_brkpoint.deiconify())
 root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpoint())
-root.bind('c', lambda x: simu8.coreReset()); root.bind('C', lambda x: reset_core())
+root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 
 def pygame_loop():
 	global single_step, step, brkpoint
@@ -349,6 +412,7 @@ def pygame_loop():
 	root.after(0, pygame_loop)
 
 simu8.coreReset()
+print_regs()
 pygame_loop()
 
 style = ttk.Style()

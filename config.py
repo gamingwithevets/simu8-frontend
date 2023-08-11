@@ -56,8 +56,5 @@ status_bar_crops = (
 (268, 0, 19, 11), # Disp
 )
 
-# Size of the ROM window.
-rom_window_size = 0x8000
-
-# Show debugging information.
-debug = True
+# Date and time format for logging module.
+dt_format = '%d/%m/%Y %H:%M:%S'

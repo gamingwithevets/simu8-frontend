@@ -127,6 +127,10 @@ def set_single_step(val):
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
 
+def reset_core():
+	simu8.coreReset()
+	print_regs()
+
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
 	finally: rc_menu.grab_release()
@@ -144,23 +148,24 @@ QR0 = ''' + ' '.join(f'{(gr.qrs[0] >> (i*8)) & 0xff:02X}' for i in range(8)) + f
 QR8 = ''' + ' '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
-CSR:PC               {csr:02X}:{pc:04X}H
-Code words @ CSR:PC  {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X}
-SP                   {sp:04X}H
-DWORDs @ SP          ''' + ' '.join(f'{int.from_bytes(read_dmem(sp + i, 4), "big"):08X}' for i in range(0, 8, 4)) + f'''
-({sp:04X}H - {sp + 15:04X}H)      ''' + ' '.join(f'{int.from_bytes(read_dmem(sp + i, 4), "big"):08X}' for i in range(8, 16, 4)) + f'''
-DSR:EA               {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
-PSW                  {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
+CSR:PC                 {csr:02X}:{pc:04X}H
+Code words @ CSR:PC    {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
+SP                     {sp:04X}H
+Words at SP            ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(0, 8, 2)) + f'''
+                       ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(8, 16, 2)) + f'''
+No. of words in stack  {(sp_start - sp) // 2 if sp_start - sp >= 0 else '[Stack underflow!]'}
+DSR:EA                 {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
+PSW                    {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
 
 
-LCSR:LR              {get_var('LCSR', ctypes.c_uint8).value:02X}:{get_var('LR', ctypes.c_uint16).value:04X}H
-ECSR1:ELR1           {get_var('ECSR1', ctypes.c_uint8).value:02X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
-ECSR2:ELR2           {get_var('ECSR2', ctypes.c_uint8).value:02X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
-ECSR3:ELR3           {get_var('ECSR3', ctypes.c_uint8).value:02X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
+LCSR:LR                {get_var('LCSR', ctypes.c_uint8).value:02X}:{get_var('LR', ctypes.c_uint16).value:04X}H
+ECSR1:ELR1             {get_var('ECSR1', ctypes.c_uint8).value:02X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
+ECSR2:ELR2             {get_var('ECSR2', ctypes.c_uint8).value:02X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
+ECSR3:ELR3             {get_var('ECSR3', ctypes.c_uint8).value:02X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
 
-EPSW1                {get_var('EPSW1', PSW_t).raw:02X}
-EPSW2                {get_var('EPSW2', PSW_t).raw:02X}
-EPSW3                {get_var('EPSW3', PSW_t).raw:02X}
+EPSW1                  {get_var('EPSW1', PSW_t).raw:02X}
+EPSW2                  {get_var('EPSW2', PSW_t).raw:02X}
+EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 '''
@@ -257,6 +262,7 @@ elif ret_val == 3:
 single_step = True
 step = True
 brkpoint = None
+sp_start = read_cmem(0)
 
 rc_menu = tk.Menu(tearoff = 0)
 rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
@@ -267,7 +273,7 @@ rc_menu.add_separator()
 rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command = w_brkpoint.deiconify)
 rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
 rc_menu.add_separator()
-rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = simu8.coreReset)
+rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
 
 root.bind('<Button-3>', open_popup)
 root.bind('s', lambda x: set_single_step(True)); root.bind('S', lambda x: set_single_step(True))
@@ -275,7 +281,7 @@ root.bind('p', lambda x: set_single_step(False)); root.bind('P', lambda x: set_s
 root.bind('j', lambda x: w_jump.deiconify()); root.bind('J', lambda x: w_jump.deiconify())
 root.bind('b', lambda x: w_brkpoint.deiconify()); root.bind('B', lambda x: w_brkpoint.deiconify())
 root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpoint())
-root.bind('c', lambda x: simu8.coreReset()); root.bind('C', lambda x: simu8.coreReset())
+root.bind('c', lambda x: simu8.coreReset()); root.bind('C', lambda x: reset_core())
 
 def pygame_loop():
 	global single_step, step, brkpoint
@@ -291,12 +297,12 @@ def pygame_loop():
 		pc = get_var('PC', ctypes.c_uint16).value
 		if (csr << 16) + pc == brkpoint:
 			tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:02X}:{pc:04X}H has been hit!')
-			single_step = True
+			set_single_step(True)
 		if ret_val == 3:
 			dnl = '\n\n'
 			logging.error(f'Illegal instruction found @ CSR:PC = {csr:02X}:{pc:04X}H')
 			tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:02X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
-			single_step = True
+			set_single_step(True)
 		if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 		if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 		

@@ -149,8 +149,12 @@ def show_mem():
 		tk.messagebox.showerror('Single-step mode required', 'This function requires single-step mode.')
 		return
 
-def get_mem():
-	data = 
+def get_mem(seg = 0):
+	data = read_dmem(0, 0xffff, seg)
+	lines = []
+	for i in range(0, 0xffff, 16):
+		for byte in data[i:i+16]:
+			pass
 
 def set_brkpoint():
 	global brkpoint
@@ -289,13 +293,22 @@ w_data_mem.geometry('600x600')
 w_data_mem.resizable(False, False)
 w_data_mem.title('Show data memory')
 w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
-segment_cb = ttk.Combobox(w_data_mem)
+
+segment_var = tk.StringVar()
+segment_cb = ttk.Combobox(w_data_mem, textvariable = segment_var, values = [f'Segment {i}' for i in range(16)])
+segment_cb.bind('<<ComboboxSelected>>', get_mem)
 segment_cb.pack()
+
+code_frame = VerticalScrolledFrame(w_data_mem)
+code_label = tk.Label(code_frame, width = 600, height = 600, font = (data_mem_font, data_mem_size), bg = '#ffffff', justify = 'left', anchor = 'nw')
+code_label.pack(side = 'left')
+
+loading_text = ttk.Label(w_data_mem, text = 'Hang on, getting data...')
 
 embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
 
-info_label = tk.Label(root, text = 'No text loaded yet.', width = width, height = height, font = ('Consolas', console_size), fg = console_fg, bg = console_bg, justify = 'left', anchor = 'nw')
+info_label = tk.Label(root, text = 'No text loaded yet.', width = width, height = height, font = (console_font, console_size), fg = console_fg, bg = console_bg, justify = 'left', anchor = 'nw')
 info_label.pack(side = 'left')
 
 os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())

@@ -22,6 +22,9 @@ height = 816
 # Name of the Tkinter window.
 root_w_name = 'fx-570ES PLUS Emulator'
 
+# "Console" text font.
+console_font = 'Consolas'
+
 # "Console" background color.
 console_bg = '#0c0c0c'
 
@@ -30,6 +33,12 @@ console_fg = '#cccccc'
 
 # "Console" text size.
 console_size = 11
+
+# Hex display text font.
+data_mem_font = 'Courier New'
+
+# Hex display text size.
+data_mem_size = 11
 
 # The settings below should work out of the box for ES and ES PLUS ROMs.
 # Only modify if you know what you're doing.

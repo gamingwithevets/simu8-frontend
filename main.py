@@ -366,6 +366,7 @@ rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command =
 rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = open_mem)
+rc_menu.add_separator()
 rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
 rc_menu.add_separator()
 

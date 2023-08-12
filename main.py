@@ -3,11 +3,12 @@ import ast
 import sys
 import ctypes
 import pygame
+import logging
+import functools
+import traceback
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.messagebox
-import traceback
-import logging
 
 from config import *
 
@@ -144,17 +145,26 @@ def set_csr_pc():
 	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
 	jump_pc_entry.delete(0, 'end')
 
-def show_mem():
+def show_mem(seg = 0):
 	if not single_step:
 		tk.messagebox.showerror('Single-step mode required', 'This function requires single-step mode.')
 		return
 
-def get_mem(seg = 0):
-	data = read_dmem(0, 0xffff, seg)
+	loading_text.pack()
+	w_data_mem.withdraw()
+	code_label['text'] = format_mem(read_dmem(0, 0xffff, seg))
+
+@functools.lru_cache
+def format_mem(byts):
 	lines = []
 	for i in range(0, 0xffff, 16):
+		line = ''
+		line_ascii = ''
 		for byte in data[i:i+16]:
-			pass
+			line += f'{byte:02X} '
+			line_ascii += chr(byte) if repr(chr(byte)).startswith(r"'\x") else '.'
+		lines.append(line + '  ' + line_ascii)
+	return '\n'.join(lines)
 
 def set_brkpoint():
 	global brkpoint
@@ -218,6 +228,33 @@ EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 '''
+
+@functools.lru_cache
+def get_scr_data(*scr_bytes):
+	screen_data_status_bar = [
+	scr_bytes[0][0] & (1 << 4),    # [S]
+	scr_bytes[0][0] & (1 << 2),    # [A]
+	scr_bytes[0][1] & (1 << 4),    # M
+	scr_bytes[0][1] & (1 << 1),    # STO
+	scr_bytes[0][2] & (1 << 6),    # RCL
+	scr_bytes[0][3] & (1 << 6),    # STAT
+	scr_bytes[0][4] & (1 << 7),    # CMPLX
+	scr_bytes[0][5] & (1 << 6),    # MAT
+	scr_bytes[0][5] & (1 << 1),    # VCT
+	scr_bytes[0][7] & (1 << 5),    # [D]
+	scr_bytes[0][7] & (1 << 1),    # [R]
+	scr_bytes[0][8] & (1 << 4),    # [G]
+	scr_bytes[0][8] & (1 << 0),    # FIX
+	scr_bytes[0][9] & (1 << 5),    # SCI
+	scr_bytes[0][0xa] & (1 << 6),  # Math
+	scr_bytes[0][0xa] & (1 << 3),  # v
+	scr_bytes[0][0xb] & (1 << 7),  # ^
+	scr_bytes[0][0xb] & (1 << 4),  # Disp
+	]
+
+	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xb, -1, -1) for k in range(7, -1, -1)] for i in range(31)]
+
+	return screen_data_status_bar, screen_data
 
 def reset_core():
 	simu8.coreReset()
@@ -386,30 +423,8 @@ def pygame_loop():
 
 	screen.blit(interface, interface_rect)
 
-	scr_bytes = [list(read_dmem(0xf000 + i*0x10, 0xc)) for i in range(0x80, 0xa0)]
-
-	screen_data_status_bar = [
-	scr_bytes[0][0] & (1 << 4),    # [S]
-	scr_bytes[0][0] & (1 << 2),    # [A]
-	scr_bytes[0][1] & (1 << 4),    # M
-	scr_bytes[0][1] & (1 << 1),    # STO
-	scr_bytes[0][2] & (1 << 6),    # RCL
-	scr_bytes[0][3] & (1 << 6),    # STAT
-	scr_bytes[0][4] & (1 << 7),    # CMPLX
-	scr_bytes[0][5] & (1 << 6),    # MAT
-	scr_bytes[0][5] & (1 << 1),    # VCT
-	scr_bytes[0][7] & (1 << 5),    # [D]
-	scr_bytes[0][7] & (1 << 1),    # [R]
-	scr_bytes[0][8] & (1 << 4),    # [G]
-	scr_bytes[0][8] & (1 << 0),    # FIX
-	scr_bytes[0][9] & (1 << 5),    # SCI
-	scr_bytes[0][0xa] & (1 << 6),  # Math
-	scr_bytes[0][0xa] & (1 << 3),  # v
-	scr_bytes[0][0xb] & (1 << 7),  # ^
-	scr_bytes[0][0xb] & (1 << 4),  # Disp
-	]
-
-	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xb, -1, -1) for k in range(7, -1, -1)] for i in range(31)]
+	scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
 	for i in range(len(screen_data_status_bar)):
 		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + status_bar_crops[i][0], 132), status_bar_crops[i])

@@ -34,6 +34,10 @@ console_fg = '#cccccc'
 # "Console" text size.
 console_size = 11
 
+# Hex display window size.
+data_mem_width = 700
+data_mem_height = 600
+
 # Hex display text font.
 data_mem_font = 'Courier New'
 

@@ -48,35 +48,6 @@ class PSW_t(ctypes.Union):
 		('field', PSW_t_field),
 	]
 
-# https://stackoverflow.com/a/16198198
-class VerticalScrolledFrame(tk.Frame):
-	def __init__(self, parent, *args, **kw):
-		tk.Frame.__init__(self, parent, *args, **kw)
-
-		vscrollbar = tk.Scrollbar(self, orient = 'vertical')
-		vscrollbar.pack(fill = 'y', side = 'right')
-		canvas = tk.Canvas(self, bd = 0, highlightthickness = 0, yscrollcommand = vscrollbar.set)
-		canvas.pack(side = 'left', fill = 'both', expand = True)
-		vscrollbar.config(command = canvas.yview)
-
-		canvas.xview_moveto(0)
-		canvas.yview_moveto(0)
-
-		self.interior = interior = tk.Frame(canvas)
-		interior_id = canvas.create_window(0, 0, window = interior, anchor = 'nw')
-
-		def _configure_interior(event):
-			size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
-			canvas.config(scrollregion = '0 0 %s %s' % size)
-			if interior.winfo_reqwidth() != canvas.winfo_width():
-				canvas.config(width=interior.winfo_reqwidth())
-		interior.bind('<Configure>', _configure_interior)
-
-		def _configure_canvas(event):
-			if interior.winfo_reqwidth() != canvas.winfo_width():
-				canvas.itemconfigure(interior_id, width=canvas.winfo_width())
-		canvas.bind('<Configure>', _configure_canvas)
-
 def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 	max_chars = int(max_chars)
 	act_code = int(act_code)
@@ -115,7 +86,7 @@ def read_dmem(addr, num_bytes, segment = 0):
 		elif i == 4: dt_ = dt.dword
 		elif i == 2: dt_ = dt.word
 		elif i == 1: dt_ = dt.byte
-		data += dt_.to_bytes(i, 'big')
+		data += dt_.to_bytes(i, 'little')
 		bytes_retrieved += i
 
 	return data
@@ -145,25 +116,31 @@ def set_csr_pc():
 	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
 	jump_pc_entry.delete(0, 'end')
 
-def show_mem(seg = 0):
-	if not single_step:
-		tk.messagebox.showerror('Single-step mode required', 'This function requires single-step mode.')
-		return
+data_mem_warning = lambda: tk.messagebox.askyesno('Hold on there buddy!', 'Opening the data memory viewer while single-step mode is disabled will slow down the emulator tremendously.\nContinue anyway?', icon = 'warning')
 
-	loading_text.pack()
-	w_data_mem.withdraw()
-	code_label['text'] = format_mem(read_dmem(0, 0xffff, seg))
+def open_mem():
+	if single_step or (not single_step and data_mem_warning()): w_data_mem.deiconify()
+
+def get_mem():
+	seg = int(segment_var.get().split()[1])
+
+	code_text['state'] = 'normal'
+	yview_bak = code_text.yview()[0]
+	code_text.delete('1.0', 'end')
+	code_text.insert('end', format_mem(read_dmem(0, 0x10000, seg), seg))
+	code_text.yview_moveto(str(yview_bak))
+	code_text['state'] = 'disabled'
 
 @functools.lru_cache
-def format_mem(byts):
+def format_mem(data, seg):
 	lines = []
-	for i in range(0, 0xffff, 16):
+	for i in range(0, 0x10000, 16):
 		line = ''
 		line_ascii = ''
 		for byte in data[i:i+16]:
 			line += f'{byte:02X} '
-			line_ascii += chr(byte) if repr(chr(byte)).startswith(r"'\x") else '.'
-		lines.append(line + '  ' + line_ascii)
+			line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
+		lines.append(f'{seg}:{i % 0x10000:04X}  {line}  {line_ascii}')
 	return '\n'.join(lines)
 
 def set_brkpoint():
@@ -187,6 +164,10 @@ def set_step():
 
 def set_single_step(val):
 	global single_step, info_label
+
+	if not val and w_data_mem.winfo_viewable():
+		if not data_mem_warning(): return
+
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
 
@@ -252,13 +233,14 @@ def get_scr_data(*scr_bytes):
 	scr_bytes[0][0xb] & (1 << 4),  # Disp
 	]
 
-	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xb, -1, -1) for k in range(7, -1, -1)] for i in range(31)]
+	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(7, -1, -1)] for i in range(31)]
 
 	return screen_data_status_bar, screen_data
 
 def reset_core():
 	simu8.coreReset()
 	print_regs()
+	get_mem()
 
 def exit_sim():
 	simu8.coreReset()
@@ -326,21 +308,23 @@ w_brkpoint.bind('<Escape>', lambda x: w_brkpoint.withdraw())
 
 w_data_mem = tk.Toplevel(root)
 w_data_mem.withdraw()
-w_data_mem.geometry('600x600')
+w_data_mem.geometry(f'{data_mem_width}x{data_mem_height}')
 w_data_mem.resizable(False, False)
 w_data_mem.title('Show data memory')
 w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
 
-segment_var = tk.StringVar()
+segment_var = tk.StringVar(); segment_var.set('Segment 0')
 segment_cb = ttk.Combobox(w_data_mem, textvariable = segment_var, values = [f'Segment {i}' for i in range(16)])
-segment_cb.bind('<<ComboboxSelected>>', get_mem)
+segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
 segment_cb.pack()
 
-code_frame = VerticalScrolledFrame(w_data_mem)
-code_label = tk.Label(code_frame, width = 600, height = 600, font = (data_mem_font, data_mem_size), bg = '#ffffff', justify = 'left', anchor = 'nw')
-code_label.pack(side = 'left')
-
-loading_text = ttk.Label(w_data_mem, text = 'Hang on, getting data...')
+code_frame = ttk.Frame(w_data_mem)
+code_text_sb = tk.Scrollbar(code_frame)
+code_text_sb.pack(side = 'right', fill = 'y')
+code_text = tk.Text(code_frame, font = (data_mem_font, data_mem_size), yscrollcommand = code_text_sb.set, state = 'disabled')
+code_text_sb.config(command = code_text.yview)
+code_text.pack(fill = 'both', expand = True)
+code_frame.pack(fill = 'both', expand = True)
 
 embed_pygame = tk.Frame(root, width = width, height = height)
 embed_pygame.pack(side = 'left')
@@ -381,6 +365,7 @@ rc_menu.add_separator()
 rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command = w_brkpoint.deiconify)
 rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
 rc_menu.add_separator()
+rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = open_mem)
 rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
 rc_menu.add_separator()
 
@@ -394,6 +379,7 @@ root.bind('p', lambda x: set_single_step(False)); root.bind('P', lambda x: set_s
 root.bind('j', lambda x: w_jump.deiconify()); root.bind('J', lambda x: w_jump.deiconify())
 root.bind('b', lambda x: w_brkpoint.deiconify()); root.bind('B', lambda x: w_brkpoint.deiconify())
 root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpoint())
+root.bind('m', lambda x: open_mem()); root.bind('M', lambda x: open_mem())
 root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 
 def pygame_loop():
@@ -420,6 +406,7 @@ def pygame_loop():
 		if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 		
 		print_regs()
+		if w_data_mem.winfo_viewable(): get_mem()
 
 	screen.blit(interface, interface_rect)
 
@@ -431,7 +418,7 @@ def pygame_loop():
 
 	for y in range(31):
 		for x in range(96):
-			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + (x*3 - 96) % 288, 144 + y*3, 3, 3))
+			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
 	if single_step: step = False
 
@@ -439,8 +426,7 @@ def pygame_loop():
 	root.update()
 	root.after(0, pygame_loop)
 
-simu8.coreReset()
-print_regs()
+reset_core()
 pygame_loop()
 
 style = ttk.Style()

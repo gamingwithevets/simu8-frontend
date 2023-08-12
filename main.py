@@ -142,7 +142,7 @@ def format_mem(data, seg):
 		for byte in data[i:i+16]:
 			line += f'{byte:02X} '
 			line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines.append(f'{seg}:{i % 0x10000:04X}  {line}  {line_ascii}')
+		lines.append(f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}')
 	return '\n'.join(lines)
 
 def set_brkpoint():

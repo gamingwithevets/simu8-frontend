@@ -96,18 +96,12 @@ def read_cmem(addr, segment = 0):
 	return get_var('CodeWord', ctypes.c_uint16).value
 
 def calc_checksum():
-	csum = ctypes.c_uint16()
-	for i in range(0, 0xfffe, 2):
-		cword = read_cmem(i, 8)
-		csum.value += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
-
-	for i in range(0, 0xfffa, 2):
-		cword = read_cmem(i, 1)
-		csum.value += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
-
-	csum.value = -csum.value
-
-	tk.messagebox.showinfo('Checksum', f'Expected checksum: {read_cmem(0xfffc, 1):04X}\nCalculated checksum: {csum.value % 0x10000:04X}')
+	csum = 0
+	csum1 = int.from_bytes(read_dmem(0xfffc, 2, 1), 'little')
+	for i in range(0x10000): csum -= int.from_bytes(read_dmem(i, 1, 8), 'big')
+	for i in range(0xfffc): csum -= int.from_bytes(read_dmem(i, 1, 1), 'big')
+	csum %= 0x10000
+	tk.messagebox.showinfo('Checksum', f'Expected checksum: {csum1:04X}\nCalculated checksum: {csum:04X}\n\n{"This looks like a good dump!" if csum == csum1 else "This is either a bad dump or an emulator ROM."}')
 
 def set_csr_pc():
 	get_var('CSR', ctypes.c_uint8).value = int(jump_csr_entry.get(), 16)

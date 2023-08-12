@@ -96,16 +96,18 @@ def read_cmem(addr, segment = 0):
 	return get_var('CodeWord', ctypes.c_uint16).value
 
 def calc_checksum():
-	csum = 0
+	csum = ctypes.c_uint16()
 	for i in range(0, 0xfffe, 2):
 		cword = read_cmem(i, 8)
-		csum += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
+		csum.value += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
 
 	for i in range(0, 0xfffa, 2):
 		cword = read_cmem(i, 1)
-		csum += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
+		csum.value += ((cword & 0xff00) >> 8) | ((cword & 0xff) << 8)
 
-	tk.messagebox.showinfo('Checksum', f'Expected checksum: {read_cmem(0xfffc, 1):04X}\nCalculated checksum: {csum % 0x10000:04X}')
+	csum.value = -csum.value
+
+	tk.messagebox.showinfo('Checksum', f'Expected checksum: {read_cmem(0xfffc, 1):04X}\nCalculated checksum: {csum.value % 0x10000:04X}')
 
 def set_csr_pc():
 	get_var('CSR', ctypes.c_uint8).value = int(jump_csr_entry.get(), 16)

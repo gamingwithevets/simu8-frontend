@@ -5,14 +5,15 @@ import ctypes
 import pygame
 import logging
 import functools
+import threading
 import traceback
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.messagebox
 
-from config import *
+import config
 
-logging.basicConfig(datefmt = dt_format, format = '[%(asctime)s] %(levelname)s: %(message)s')
+logging.basicConfig(datefmt = config.dt_format, format = '[%(asctime)s] %(levelname)s: %(message)s')
 
 class Data_t(ctypes.Union):
 	_fields_ = [
@@ -112,32 +113,45 @@ def set_csr_pc():
 	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
 	jump_pc_entry.delete(0, 'end')
 
-data_mem_warning = lambda: tk.messagebox.askyesno('Hold on there buddy!', 'Opening the data memory viewer while single-step mode is disabled will slow down the emulator tremendously.\nContinue anyway?', icon = 'warning')
+data_mem_warning = lambda: tk.messagebox.askyesno('Hold on there buddy!', 'Opening the data memory viewer while single-step mode is disabled will slow down the emulator tremendously.\nContinue anyway?', icon = 'warning', default = 'no')
 
 def open_mem():
 	if single_step or (not single_step and data_mem_warning()): w_data_mem.deiconify()
 
+data_str_cache = ''
 def get_mem():
+	global data_str_cache
+
 	seg = int(segment_var.get().split()[1])
+	data_str = format_mem(read_dmem(0, 0x10000, seg), seg)
 
 	code_text['state'] = 'normal'
 	yview_bak = code_text.yview()[0]
-	code_text.delete('1.0', 'end')
-	code_text.insert('end', format_mem(read_dmem(0, 0x10000, seg), seg))
-	code_text.yview_moveto(str(yview_bak))
+
+	if data_str_cache:
+		for k, v in data_str.items():
+			code_text.delete(f'{k+1}.0', f'{k+1}.end')
+			code_text.insert(f'{k+1}.0', v)
+	else:
+		data_str_cache = data_str
+		code_text.insert('end', '\n'.join(data_str.values()))
+
+	code_text.yview_moveto(yview_bak)
 	code_text['state'] = 'disabled'
 
 @functools.lru_cache
 def format_mem(data, seg):
-	lines = []
+	lines = {}
+	j = 0
 	for i in range(0, 0x10000, 16):
 		line = ''
 		line_ascii = ''
 		for byte in data[i:i+16]:
 			line += f'{byte:02X} '
 			line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines.append(f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}')
-	return '\n'.join(lines)
+		lines[j] = f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}'
+		j += 1
+	return lines
 
 def set_brkpoint():
 	global brkpoint
@@ -159,17 +173,36 @@ def set_step():
 	step = True
 
 def set_single_step(val):
-	global single_step, info_label
+	global single_step, core_step_thread_firstrun
 
 	if not val and w_data_mem.winfo_viewable():
 		if not data_mem_warning(): return
 
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
+	if not val: threading.Thread(target = core_step_loop, daemon = True).start()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
 	finally: rc_menu.grab_release()
+
+def core_step():
+	ret_val = simu8.coreStep()
+	csr = get_var('CSR', ctypes.c_uint8).value
+	pc = get_var('PC', ctypes.c_uint16).value
+	if (csr << 16) + pc == brkpoint:
+		tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:02X}:{pc:04X}H has been hit!')
+		set_single_step(True)
+	if ret_val == 3:
+		dnl = '\n\n'
+		logging.error(f'Illegal instruction found @ CSR:PC = {csr:02X}:{pc:04X}H')
+		tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:02X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
+		set_single_step(True)
+	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
+	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
+
+def core_step_loop():
+	while not single_step: core_step()
 
 def print_regs():
 	gr = get_var('GR', GR_t)
@@ -189,7 +222,6 @@ Code words @ CSR:PC    {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {re
 SP                     {sp:04X}H
 Words at SP            ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(0, 8, 2)) + f'''
                        ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(8, 16, 2)) + f'''
-No. of words in stack  {(sp_start - sp) // 2 if sp_start - sp >= 0 else '[Stack underflow!]'}
 DSR:EA                 {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
 PSW                    {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
 
@@ -255,14 +287,14 @@ if pygame.version.vernum < (2, 2, 0):
 	print(f'This program requires at least Pygame 2.2.0. (You are running Pygame {pygame.version.ver})')
 	sys.exit()
 
-simu8 = ctypes.CDLL(os.path.abspath(shared_lib))
+simu8 = ctypes.CDLL(os.path.abspath(config.shared_lib))
 
 root = tk.Tk()
-root.geometry(f'{width*2}x{height}')
+root.geometry(f'{config.width*2}x{config.height}')
 root.resizable(False, False)
-root.title(root_w_name)
+root.title(config.root_w_name)
 root.focus_set()
-root['bg'] = console_bg
+root['bg'] = config.console_bg
 
 w_jump = tk.Toplevel(root)
 w_jump.withdraw()
@@ -304,7 +336,7 @@ w_brkpoint.bind('<Escape>', lambda x: w_brkpoint.withdraw())
 
 w_data_mem = tk.Toplevel(root)
 w_data_mem.withdraw()
-w_data_mem.geometry(f'{data_mem_width}x{data_mem_height}')
+w_data_mem.geometry(f'{config.data_mem_width}x{config.data_mem_height}')
 w_data_mem.resizable(False, False)
 w_data_mem.title('Show data memory')
 w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
@@ -317,15 +349,15 @@ segment_cb.pack()
 code_frame = ttk.Frame(w_data_mem)
 code_text_sb = tk.Scrollbar(code_frame)
 code_text_sb.pack(side = 'right', fill = 'y')
-code_text = tk.Text(code_frame, font = (data_mem_font, data_mem_size), yscrollcommand = code_text_sb.set, state = 'disabled')
+code_text = tk.Text(code_frame, font = config.data_mem_font, yscrollcommand = code_text_sb.set, state = 'disabled')
 code_text_sb.config(command = code_text.yview)
 code_text.pack(fill = 'both', expand = True)
 code_frame.pack(fill = 'both', expand = True)
 
-embed_pygame = tk.Frame(root, width = width, height = height)
+embed_pygame = tk.Frame(root, width = config.width, height = config.height)
 embed_pygame.pack(side = 'left')
 
-info_label = tk.Label(root, text = 'No text loaded yet.', width = width, height = height, font = (console_font, console_size), fg = console_fg, bg = console_bg, justify = 'left', anchor = 'nw')
+info_label = tk.Label(root, text = 'Loading...', width = config.width, height = config.height, font = config.console_font, fg = config.console_fg, bg = config.console_bg, justify = 'left', anchor = 'nw')
 info_label.pack(side = 'left')
 
 os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())
@@ -334,12 +366,12 @@ pygame.init()
 pygame.display.init()
 screen = pygame.display.set_mode()
 
-interface = pygame.image.load(interface_path)
+interface = pygame.image.load(config.interface_path)
 interface_rect = interface.get_rect()
-status_bar = pygame.image.load(status_bar_path)
+status_bar = pygame.image.load(config.status_bar_path)
 status_bar_rect = status_bar.get_rect()
 
-ret_val = simu8.memoryInit(ctypes.c_char_p(rom_file.encode()), None)
+ret_val = simu8.memoryInit(ctypes.c_char_p(config.rom_file.encode()), None)
 if ret_val == 2:
 	logging.error('Unable to allocate RAM for emulated memory.')
 	sys.exit(-1)
@@ -350,7 +382,6 @@ elif ret_val == 3:
 single_step = True
 step = False
 brkpoint = None
-sp_start = read_cmem(0)
 
 rc_menu = tk.Menu(root, tearoff = 0)
 rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
@@ -388,20 +419,7 @@ def pygame_loop():
 		if event.type == pygame.QUIT: exit_sim()
 
 	if (single_step and step) or not single_step:
-		ret_val = simu8.coreStep()
-		csr = get_var('CSR', ctypes.c_uint8).value
-		pc = get_var('PC', ctypes.c_uint16).value
-		if (csr << 16) + pc == brkpoint:
-			tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:02X}:{pc:04X}H has been hit!')
-			set_single_step(True)
-		if ret_val == 3:
-			dnl = '\n\n'
-			logging.error(f'Illegal instruction found @ CSR:PC = {csr:02X}:{pc:04X}H')
-			tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:02X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
-			set_single_step(True)
-		if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
-		if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
-		
+		if single_step: core_step()
 		print_regs()
 		if w_data_mem.winfo_viewable(): get_mem()
 
@@ -411,7 +429,7 @@ def pygame_loop():
 	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
 	for i in range(len(screen_data_status_bar)):
-		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + status_bar_crops[i][0], 132), status_bar_crops[i])
+		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
 
 	for y in range(31):
 		for x in range(96):
@@ -427,7 +445,7 @@ reset_core()
 pygame_loop()
 
 style = ttk.Style()
-style.configure('Con.TButton', background = console_bg)
+style.configure('Con.TButton', background = config.console_bg)
 
 step_bt = ttk.Button(root, text = 'Step', style = 'Con.TButton', command = set_step)
 step_bt.place(rely = 1.0, relx = 1.0, x = 0, y = 0, anchor = 'se')

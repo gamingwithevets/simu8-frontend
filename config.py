@@ -9,7 +9,6 @@ rom_file = 'rom.bin'
 # Path to the status bar image.
 status_bar_path = 'images/interface_es_bar.png'
 
-
 # Path to the interface image.
 interface_path = 'images/interface_esp_991esp.png'
 
@@ -23,7 +22,7 @@ height = 816
 root_w_name = 'fx-570ES PLUS Emulator'
 
 # "Console" text font.
-console_font = 'Consolas'
+console_font = ('Consolas', 11)
 
 # "Console" background color.
 console_bg = '#0c0c0c'
@@ -31,18 +30,12 @@ console_bg = '#0c0c0c'
 # "Console" text color.
 console_fg = '#cccccc'
 
-# "Console" text size.
-console_size = 11
-
 # Hex display window size.
 data_mem_width = 700
 data_mem_height = 600
 
 # Hex display text font.
-data_mem_font = 'Courier New'
-
-# Hex display text size.
-data_mem_size = 11
+data_mem_font = ('Courier New', 11)
 
 # The settings below should work out of the box for ES and ES PLUS ROMs.
 # Only modify if you know what you're doing.

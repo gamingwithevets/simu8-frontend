@@ -66,15 +66,13 @@ def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 def get_var(var, typ): return typ.in_dll(simu8, var)
 
 def split_num(num):
-	if num <= 0: return []
+    if num <= 0: return []
+    result = []
+    for i in (8, 4, 2, 1):
+        count, num = divmod(num, i)
+        result.extend([i] * count)
+    return result
 
-	result = []
-	for i in (8, 4, 2, 1):
-		while num >= i:
-			result.append(i)
-			num -= i
-
-	return result
 
 def read_dmem(addr, num_bytes, segment = 0):
 	data = b''
@@ -173,14 +171,14 @@ def set_step():
 	step = True
 
 def set_single_step(val):
-	global single_step, core_step_thread_firstrun
+	global single_step
 
 	if not val and w_data_mem.winfo_viewable():
 		if not data_mem_warning(): return
 
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
-	if not val: threading.Thread(target = core_step_loop, daemon = True).start()
+	if val: print_regs()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
@@ -200,9 +198,6 @@ def core_step():
 		set_single_step(True)
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
-
-def core_step_loop():
-	while not single_step: core_step()
 
 def print_regs():
 	gr = get_var('GR', GR_t)
@@ -237,6 +232,13 @@ EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 '''
+
+def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
+	font = pygame.font.SysFont(font_name, int(size))
+	text_surface = font.render(str(text), True, color)
+	text_rect = text_surface.get_rect()
+	exec('text_rect.' + anchor + ' = (x,y)')
+	screen.blit(text_surface, text_rect)
 
 @functools.lru_cache
 def get_scr_data(*scr_bytes):
@@ -410,6 +412,8 @@ root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpo
 root.bind('m', lambda x: open_mem()); root.bind('M', lambda x: open_mem())
 root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 
+clock = pygame.time.Clock()
+
 def pygame_loop():
 	global single_step, step, brkpoint
 
@@ -419,9 +423,11 @@ def pygame_loop():
 		if event.type == pygame.QUIT: exit_sim()
 
 	if (single_step and step) or not single_step:
-		if single_step: core_step()
+		core_step()
 		print_regs()
 		if w_data_mem.winfo_viewable(): get_mem()
+
+	clock.tick()
 
 	screen.blit(interface, interface_rect)
 
@@ -435,7 +441,9 @@ def pygame_loop():
 		for x in range(96):
 			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
+
 	if single_step: step = False
+	else: draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (0, 0, 0), anchor = 'topleft')
 
 	pygame.display.update()
 	root.update()

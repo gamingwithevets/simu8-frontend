@@ -1,0 +1,3 @@
+[submodule "SimU8"]
+	path = SimU8
+	url = https://github.com/LifeEmu/SimU8.git

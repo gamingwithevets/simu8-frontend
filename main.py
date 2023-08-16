@@ -1,5 +1,4 @@
 import os
-import ast
 import sys
 import ctypes
 import pygame
@@ -50,8 +49,7 @@ class PSW_t(ctypes.Union):
 	]
 
 def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
-	max_chars = int(max_chars)
-	act_code = int(act_code)
+	max_chars, act_code = int(max_chars), int(act_code)
 	if rang: rang = eval(rang)
 
 	if len(new_str) > max_chars: return False
@@ -65,28 +63,25 @@ def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 
 def get_var(var, typ): return typ.in_dll(simu8, var)
 
-def split_num(num):
-    if num <= 0: return []
-    result = []
-    for i in (8, 4, 2, 1):
-        count, num = divmod(num, i)
-        result.extend([i] * count)
-    return result
-
-
 def read_dmem(addr, num_bytes, segment = 0):
 	data = b''
-	bytes_retrieved = 0
+	bytes_grabbed = 0
 
-	for i in split_num(num_bytes):
-		simu8.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_retrieved), ctypes.c_size_t(i))
+	while bytes_grabbed < num_bytes:
+		remaining = num_bytes - bytes_grabbed
+		if remaining >= 8: grab = 8
+		elif remaining >= 4: grab = 4
+		elif remaining >= 2: grab = 2
+		else: grab = 1
+
+		simu8.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
 		dt = get_var('DataRaw', Data_t)
-		if i == 8: dt_ = dt.qword
-		elif i == 4: dt_ = dt.dword
-		elif i == 2: dt_ = dt.word
-		elif i == 1: dt_ = dt.byte
-		data += dt_.to_bytes(i, 'little')
-		bytes_retrieved += i
+		if grab == 8: dt_ = dt.qword
+		elif grab == 4: dt_ = dt.dword
+		elif grab == 2: dt_ = dt.word
+		else: dt_ = dt.byte
+		data += dt_.to_bytes(grab, 'little')
+		bytes_grabbed += grab
 
 	return data
 
@@ -117,37 +112,39 @@ def open_mem():
 	if single_step or (not single_step and data_mem_warning()): w_data_mem.deiconify()
 
 data_str_cache = ''
+seg_cache = 0
 def get_mem():
-	global data_str_cache
+	global data_str_cache, seg_cache
 
 	seg = int(segment_var.get().split()[1])
-	data_str = format_mem(read_dmem(0, 0x10000, seg), seg)
+	data_str = format_mem(seg, read_dmem(0, 0x10000, seg))
 
 	code_text['state'] = 'normal'
 	yview_bak = code_text.yview()[0]
 
-	if data_str_cache:
+	if data_str_cache and seg_cache == seg:
 		for k, v in data_str.items():
-			code_text.delete(f'{k+1}.0', f'{k+1}.end')
-			code_text.insert(f'{k+1}.0', v)
+			if data_str_cache[k] != v:
+				code_text.delete(f'{k+1}.0', f'{k+1}.end')
+				code_text.insert(f'{k+1}.0', v)
 	else:
 		data_str_cache = data_str
+		seg_cache = seg
+		code_text.delete('1.0', 'end')
 		code_text.insert('end', '\n'.join(data_str.values()))
 
 	code_text.yview_moveto(yview_bak)
 	code_text['state'] = 'disabled'
 
 @functools.lru_cache
-def format_mem(data, seg):
+def format_mem(seg, data):
 	lines = {}
 	j = 0
 	for i in range(0, 0x10000, 16):
 		line = ''
 		line_ascii = ''
-		for byte in data[i:i+16]:
-			line += f'{byte:02X} '
-			line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines[j] = f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}'
+		for byte in data[i:i+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
+		lines[j] = f'{seg:X}:{j*16 % 0x10000:04X}  {line}  {line_ascii}'
 		j += 1
 	return lines
 
@@ -215,8 +212,8 @@ Control registers:
 CSR:PC                 {csr:02X}:{pc:04X}H
 Code words @ CSR:PC    {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
 SP                     {sp:04X}H
-Words at SP            ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(0, 8, 2)) + f'''
-                       ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'big'), '04X') for i in range(8, 16, 2)) + f'''
+Words at SP            ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
+                       ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
 DSR:EA                 {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
 PSW                    {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
 
@@ -231,7 +228,7 @@ EPSW2                  {get_var('EPSW2', PSW_t).raw:02X}
 EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
-'''
+''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
 
 def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
 	font = pygame.font.SysFont(font_name, int(size))
@@ -381,9 +378,8 @@ elif ret_val == 3:
 	logging.error(f'Cannot open the ROM file {rom_file}. If the file exists, please check the settings in config.py.')
 	sys.exit(-1)
 
-single_step = True
-step = False
-brkpoint = None
+show_regs = tk.BooleanVar(value = True)
+disp_lcd = tk.BooleanVar(value = True)
 
 rc_menu = tk.Menu(root, tearoff = 0)
 rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
@@ -395,6 +391,9 @@ rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command =
 rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = open_mem)
+rc_menu.add_separator()
+rc_menu.add_checkbutton(label = 'Show registers outside of single-step', accelerator = 'R', variable = show_regs)
+rc_menu.add_checkbutton(label = 'Display LCD', accelerator = 'D', variable = disp_lcd)
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
 rc_menu.add_separator()
@@ -410,8 +409,11 @@ root.bind('j', lambda x: w_jump.deiconify()); root.bind('J', lambda x: w_jump.de
 root.bind('b', lambda x: w_brkpoint.deiconify()); root.bind('B', lambda x: w_brkpoint.deiconify())
 root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpoint())
 root.bind('m', lambda x: open_mem()); root.bind('M', lambda x: open_mem())
+root.bind('r', lambda x: show_regs.set(not show_regs.get())); root.bind('R', lambda x: show_regs.set(not show_regs.get()))
+root.bind('d', lambda x: disp_lcd.set(not disp_lcd.get())); root.bind('D', lambda x: disp_lcd.set(not disp_lcd.get()))
 root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 
+single_step, step, brkpoint = True, False, None
 clock = pygame.time.Clock()
 
 def pygame_loop():
@@ -429,21 +431,26 @@ def pygame_loop():
 
 	clock.tick()
 
-	screen.blit(interface, interface_rect)
+	screen.fill((0, 0, 0))
+	if disp_lcd.get():
+		screen.blit(interface, interface_rect)
+		
+		scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+		screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
-	scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
-	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
+		for i in range(len(screen_data_status_bar)):
+			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
 
-	for i in range(len(screen_data_status_bar)):
-		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
+		for y in range(31):
+			for x in range(96):
+				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
-	for y in range(31):
-		for x in range(96):
-			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
-
+	else:
+		draw_text('LCD is disabled.', 22, config.width // 2, config.height // 2 - 11, (255, 255, 255))
+		draw_text('To enable, press D or right-click > Display LCD.', 22, config.width // 2, config.height // 2 + 11, (255, 255, 255))
 
 	if single_step: step = False
-	else: draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (0, 0, 0), anchor = 'topleft')
+	else: draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (0, 0, 0) if disp_lcd.get() else (255, 255, 255), anchor = 'topleft')
 
 	pygame.display.update()
 	root.update()

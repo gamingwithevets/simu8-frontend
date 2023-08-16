@@ -11,29 +11,21 @@ However, since this frontend is written in Python, it may be slow depending on y
 Because SimU8 was written in C and this frontend was written in Python, a **shared library** is needed to use the frontend.
 That's not really a big deal, however I thought I should mention it, as C compilers are usually used for compiling binaries and not shared libraries.
 
-1. Clone the SimU8 repository:
-```
-git clone https://github.com/SimU8.git
-```
-If you don't have `git` installed you can just download a ZIP file and extract it.
-
-2. Place yourself in the root of the SimU8 repo and run:
-```
-gcc src/core.c src/mmu.c -O3 -fPIC -shared -o simu8.so
-```
-On Windows you can use `gcc` on MingW or Cygwin.  
-If no errors appear, a `simu8.so` file should appear.
-
-3. Now clone this repository:
+1. Clone this repository and the SimU8 submodule:
 ```
 git clone https://github.com/gamingwithevets/simu8-frontend.git
+git submodule update
 ```
-4. Edit the `config.py` file as needed.
-5. Run `python main.py` (or `python3 main.py`) and you're done.
+2. Go to the repo directory and run the command below (this assumes the SimU8 submodule is located in the `SimU8` directory):
+```
+gcc SimU8/src/core.c SimU8/src/mmu.c -O3 -fPIC -shared -o simu8.so
+```
+3. Edit the `config.py` file as needed.
+4. Run `python main.py` (or `python3 main.py`) and you're done.
 
 # Usage
 When you open the emulator, you can right-click to see the available functions of the emulator.
-These functions 
+These functions were originally from `testcore.c` and reimplemented in Python.
 
 # Images
 This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).

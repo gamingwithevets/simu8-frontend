@@ -108,43 +108,67 @@ def set_csr_pc():
 
 data_mem_warning = lambda: tk.messagebox.askyesno('Hold on there buddy!', 'Opening the data memory viewer while single-step mode is disabled will slow down the emulator tremendously.\nContinue anyway?', icon = 'warning', default = 'no')
 
-def open_mem():
-	if single_step or (not single_step and data_mem_warning()): w_data_mem.deiconify()
-
-data_str_cache = ''
-seg_cache = 0
-def get_mem():
-	global data_str_cache, seg_cache
+data_cache = {}
+def init_mem():
+	global data_cache
 
 	seg = int(segment_var.get().split()[1])
-	data_str = format_mem(seg, read_dmem(0, 0x10000, seg))
 
 	code_text['state'] = 'normal'
-	yview_bak = code_text.yview()[0]
+	code_text.delete('1.0', 'end')
+	for i in range(0, 0x10000, 16):
+		string = f'{seg:X}:{i:04X}  ' + ('00 '*16) + '  ' + '.'*16 + '\n'
+		data_cache[i // 16] = string
+		code_text.insert('end', string)
+	code_text.delete('end-1c', 'end')
+	code_text['state'] = 'disabled'
 
-	if data_str_cache and seg_cache == seg:
-		for k, v in data_str.items():
-			if data_str_cache[k] != v:
-				code_text.delete(f'{k+1}.0', f'{k+1}.end')
-				code_text.insert(f'{k+1}.0', v)
-	else:
-		data_str_cache = data_str
-		seg_cache = seg
+def open_mem():
+	if single_step or (not single_step and data_mem_warning()):
+		get_mem()
+		w_data_mem.deiconify()
+
+line_count = 50
+def get_mem():
+	global data_cache
+
+	seg = int(segment_var.get().split()[1])
+
+	code_text['state'] = 'normal'
+	yview = code_text.yview()
+
+	if single_step:
+		data_str = format_mem(seg, read_dmem(0, 0x10000, seg), 0)
+		data_cache = data_str
 		code_text.delete('1.0', 'end')
-		code_text.insert('end', '\n'.join(data_str.values()))
+		code_text.insert('end', '\n'.join(data_str.values()) + '\n')
+	else:
+		sl = int(yview[0] * 4096)
+		addr = sl * 16
+		if addr + line_count*16 > 0x10000: lines = 4096 - sl
+		else: lines = line_count
 
-	code_text.yview_moveto(yview_bak)
+		data_str = format_mem(seg, read_dmem(addr, lines*16, seg), addr)
+		for k, v in data_str.items():
+			if data_cache[k] != v:
+				code_text.delete(f'{k+1}.0', f'{k+2}.0')
+				if code_text.get('end-2c', 'end-1c') != '\n': code_text.insert('end', '\n')
+				code_text.insert(f'{k+1}.0', v + '\n')
+				data_cache[k] = v
+	code_text.delete('end-1c', 'end')
+
+	code_text.yview_moveto(yview[0])
 	code_text['state'] = 'disabled'
 
 @functools.lru_cache
-def format_mem(seg, data):
+def format_mem(seg, data, addr):
 	lines = {}
-	j = 0
-	for i in range(0, 0x10000, 16):
+	j = addr // 16
+	for i in range(addr, addr + len(data), 16):
 		line = ''
 		line_ascii = ''
-		for byte in data[i:i+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines[j] = f'{seg:X}:{j*16 % 0x10000:04X}  {line}  {line_ascii}'
+		for byte in data[i-addr:i-addr+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
+		lines[j] = f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}'
 		j += 1
 	return lines
 
@@ -267,7 +291,7 @@ def get_scr_data(*scr_bytes):
 def reset_core():
 	simu8.coreReset()
 	print_regs()
-	get_mem()
+	init_mem()
 
 def exit_sim():
 	simu8.coreReset()
@@ -348,7 +372,7 @@ segment_cb.pack()
 code_frame = ttk.Frame(w_data_mem)
 code_text_sb = tk.Scrollbar(code_frame)
 code_text_sb.pack(side = 'right', fill = 'y')
-code_text = tk.Text(code_frame, font = config.data_mem_font, yscrollcommand = code_text_sb.set, state = 'disabled')
+code_text = tk.Text(code_frame, font = config.data_mem_font, yscrollcommand = code_text_sb.set, wrap = 'none', state = 'disabled')
 code_text_sb.config(command = code_text.yview)
 code_text.pack(fill = 'both', expand = True)
 code_frame.pack(fill = 'both', expand = True)
@@ -402,6 +426,9 @@ extra_funcs = tk.Menu(rc_menu, tearoff = 0)
 extra_funcs.add_command(label = 'Calculate checksum', command = calc_checksum)
 rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
 
+rc_menu.add_separator()
+rc_menu.add_command(label = 'Quit', accelerator = 'Q', command = exit_sim)
+
 root.bind('<Button-3>', open_popup)
 root.bind('s', lambda x: set_single_step(True)); root.bind('S', lambda x: set_single_step(True))
 root.bind('p', lambda x: set_single_step(False)); root.bind('P', lambda x: set_single_step(False))
@@ -412,6 +439,7 @@ root.bind('m', lambda x: open_mem()); root.bind('M', lambda x: open_mem())
 root.bind('r', lambda x: show_regs.set(not show_regs.get())); root.bind('R', lambda x: show_regs.set(not show_regs.get()))
 root.bind('d', lambda x: disp_lcd.set(not disp_lcd.get())); root.bind('D', lambda x: disp_lcd.set(not disp_lcd.get()))
 root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
+root.bind('q', lambda x: exit_sim()); root.bind('Q', lambda x: exit_sim())
 
 single_step, step, brkpoint = True, False, None
 clock = pygame.time.Clock()

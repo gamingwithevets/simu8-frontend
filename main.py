@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import ctypes
 import pygame
 import logging
@@ -194,18 +195,27 @@ def set_step():
 def set_single_step(val):
 	global single_step
 
+	if single_step == val: return
+
 	if not val and w_data_mem.winfo_viewable():
 		if not data_mem_warning(): return
 
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
 	if val: print_regs()
+	else:
+		print('single step = False')
+		threading.Thread(target = core_step_loop).start()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
 	finally: rc_menu.grab_release()
 
 def core_step():
+	global ok
+
+	ok = False
+
 	ret_val = simu8.coreStep()
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
@@ -219,6 +229,11 @@ def core_step():
 		set_single_step(True)
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
+
+	ok = True
+
+def core_step_loop():
+	while not single_step: core_step()
 
 def print_regs():
 	gr = get_var('GR', GR_t)
@@ -441,7 +456,8 @@ root.bind('d', lambda x: disp_lcd.set(not disp_lcd.get())); root.bind('D', lambd
 root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 root.bind('q', lambda x: exit_sim()); root.bind('Q', lambda x: exit_sim())
 
-single_step, step, brkpoint = True, False, None
+single_step = ok = True
+step, brkpoint = False, None
 clock = pygame.time.Clock()
 
 def pygame_loop():
@@ -452,8 +468,8 @@ def pygame_loop():
 	for event in pygame.event.get():
 		if event.type == pygame.QUIT: exit_sim()
 
+	if single_step and step: core_step()
 	if (single_step and step) or not single_step:
-		core_step()
 		print_regs()
 		if w_data_mem.winfo_viewable(): get_mem()
 
@@ -463,22 +479,24 @@ def pygame_loop():
 	if disp_lcd.get():
 		screen.blit(interface, interface_rect)
 		
-		scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
-		screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
+		if ok:
+			scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+			screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
-		for i in range(len(screen_data_status_bar)):
-			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
+			for i in range(len(screen_data_status_bar)):
+				if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
 
-		for y in range(31):
-			for x in range(96):
-				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
+			for y in range(31):
+				for x in range(96):
+					if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
 	else:
 		draw_text('LCD is disabled.', 22, config.width // 2, config.height // 2 - 11, (255, 255, 255))
 		draw_text('To enable, press D or right-click > Display LCD.', 22, config.width // 2, config.height // 2 + 11, (255, 255, 255))
 
 	if single_step: step = False
-	else: draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (0, 0, 0) if disp_lcd.get() else (255, 255, 255), anchor = 'topleft')
+	else:
+		draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (255, 0, 0), anchor = 'topleft')
 
 	pygame.display.update()
 	root.update()

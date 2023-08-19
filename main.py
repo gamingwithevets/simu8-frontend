@@ -107,8 +107,6 @@ def set_csr_pc():
 	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
 	jump_pc_entry.delete(0, 'end')
 
-data_mem_warning = lambda: tk.messagebox.askyesno('Hold on there buddy!', 'Opening the data memory viewer while single-step mode is disabled will slow down the emulator tremendously.\nContinue anyway?', icon = 'warning', default = 'no')
-
 data_cache = {}
 def init_mem():
 	global data_cache
@@ -125,12 +123,17 @@ def init_mem():
 	code_text['state'] = 'disabled'
 
 def open_mem():
-	if single_step or (not single_step and data_mem_warning()):
-		get_mem()
-		w_data_mem.deiconify()
+	get_mem()
+	w_data_mem.deiconify()
+
+def sb_yview(*args):
+	code_text.yview(*args)
+	get_mem()
 
 line_count = 50
 def get_mem():
+	if not ok: return
+
 	global data_cache
 
 	seg = int(segment_var.get().split()[1])
@@ -160,6 +163,8 @@ def get_mem():
 
 	code_text.yview_moveto(yview[0])
 	code_text['state'] = 'disabled'
+
+	root.update_idletasks()
 
 @functools.lru_cache
 def format_mem(seg, data, addr):
@@ -197,15 +202,11 @@ def set_single_step(val):
 
 	if single_step == val: return
 
-	if not val and w_data_mem.winfo_viewable():
-		if not data_mem_warning(): return
-
 	single_step = val
 	step_bt['state'] = 'normal' if val else 'disabled'
 	if val: print_regs()
 	else:
-		print('single step = False')
-		threading.Thread(target = core_step_loop).start()
+		threading.Thread(target = core_step_loop, daemon = True).start()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
@@ -214,9 +215,10 @@ def open_popup(x):
 def core_step():
 	global ok
 
-	ok = False
 
+	ok = False
 	ret_val = simu8.coreStep()
+	ok = True
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
 	if (csr << 16) + pc == brkpoint:
@@ -230,7 +232,6 @@ def core_step():
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 
-	ok = True
 
 def core_step_loop():
 	while not single_step: core_step()
@@ -244,8 +245,11 @@ def print_regs():
 === REGISTERS ===
 
 General registers:
-QR0 = ''' + ' '.join(f'{(gr.qrs[0] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
-QR8 = ''' + ' '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
+R0   R1   R2   R3   R4   R5   R6   R7
+''' + '   '.join(f'{(gr.qrs[0] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
+
+R8   R9   R10  R11  R12  R13  R14  R15
+''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
 CSR:PC                 {csr:02X}:{pc:04X}H
@@ -382,13 +386,14 @@ w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
 segment_var = tk.StringVar(); segment_var.set('Segment 0')
 segment_cb = ttk.Combobox(w_data_mem, textvariable = segment_var, values = [f'Segment {i}' for i in range(16)])
 segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
+segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
 segment_cb.pack()
 
 code_frame = ttk.Frame(w_data_mem)
 code_text_sb = tk.Scrollbar(code_frame)
 code_text_sb.pack(side = 'right', fill = 'y')
 code_text = tk.Text(code_frame, font = config.data_mem_font, yscrollcommand = code_text_sb.set, wrap = 'none', state = 'disabled')
-code_text_sb.config(command = code_text.yview)
+code_text_sb.config(command = sb_yview)
 code_text.pack(fill = 'both', expand = True)
 code_frame.pack(fill = 'both', expand = True)
 

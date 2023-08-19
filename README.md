@@ -1,7 +1,7 @@
 This is a **frontend** for [LifeEmu](https://github.com/LifeEmu)'s [SimU8](https://github.com/LifeEmu/SimU8) emulator written in Python. 
 It's a very simple Tkinter window with Pygame embedded into it.
 
-Currently, LifeEmu's emulator is unfinished, therefore the frontend may look like it isn't working properly.
+Currently, SimU8 is unfinished, therefore the frontend may look like it isn't working properly.
 However, the screen **has been tested and verified to be working** via direct memory editing and jumping to various functions in the fx-570ES PLUS real ROM.
 
 This frontend serves as a replacement to `testcore.c`, a console-only C script that's used for testing.
@@ -26,6 +26,9 @@ gcc SimU8/src/core.c SimU8/src/mmu.c -O3 -fPIC -shared -o simu8.so
 # Usage
 When you open the emulator, you can right-click to see the available functions of the emulator.
 These functions were originally from `testcore.c` and reimplemented in Python.
+
+Note that when single-step mode is disabled, the screen and the memory shown in the data memory viewer may flicker.
+This is because screen data may be grabbed when SimU8's `coreStep` function is running.
 
 # Images
 This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).

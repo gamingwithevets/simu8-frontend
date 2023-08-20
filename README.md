@@ -27,6 +27,8 @@ gcc SimU8/src/core.c SimU8/src/mmu.c -O3 -fPIC -shared -o simu8.so
 When you open the emulator, you can right-click to see the available functions of the emulator.
 These functions were originally from `testcore.c` and reimplemented in Python.
 
+To step, press any key (except the keys reserved for other functions). You can also hold down a key to run the emulator at a reasonable speed, though not as fast as when single-step mode is disabled.
+
 Note that when single-step mode is disabled, the screen and the memory shown in the data memory viewer may flicker.
 This is because screen data may be grabbed when SimU8's `coreStep` function is running.
 

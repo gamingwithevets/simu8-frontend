@@ -489,20 +489,19 @@ def pygame_loop():
 	screen.fill((0, 0, 0))
 	screen.blit(interface, interface_rect)
 	
-	if ok:
-		scr_bytes = [read_dmem((0xf000 if disp_lcd.get() else 0x87d0) + i*0x10, 0xc) for i in range(0x80, 0xa0)]
-		screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
+	draw_text(f'Displaying {"LCD" if disp_lcd.get() else "buffer"}', 22, config.width // 2, 22, config.pygame_color, anchor = 'midtop')
+	scr_bytes = [read_dmem((0xf000 if disp_lcd.get() else 0x87d0) + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
-		for i in range(len(screen_data_status_bar)):
-			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
+	for i in range(len(screen_data_status_bar)):
+		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
 
-		for y in range(31):
-			for x in range(96):
-				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
+	for y in range(31):
+		for x in range(96):
+			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
 	if single_step: step = False
-	else:
-		draw_text(f'{clock.get_fps():.1f}', 22, 0, 0, (255, 0, 0), anchor = 'topleft')
+	else: draw_text(f'{clock.get_fps():.1f} FPS', 22, config.width // 2, 44, config.pygame_color, anchor = 'midtop')
 
 	pygame.display.update()
 	root.update()

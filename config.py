@@ -30,6 +30,9 @@ console_bg = '#0c0c0c'
 # "Console" text color.
 console_fg = '#cccccc'
 
+# Pygame text color.
+pygame_color = (0, 0, 0)
+
 # Hex display window size.
 data_mem_width = 700
 data_mem_height = 600

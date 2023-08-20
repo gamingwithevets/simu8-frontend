@@ -219,7 +219,7 @@ def open_popup(x):
 	finally: rc_menu.grab_release()
 
 def core_step():
-	global ok
+	global ok, prev_csr_pc
 
 	ok = False
 	ret_val = simu8.coreStep()
@@ -237,12 +237,12 @@ def core_step():
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 
+	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
+
 def core_step_loop():
 	while not single_step: core_step()
 
 def print_regs():
-	global prev_csr_pc
-
 	gr = get_var('GR', GR_t)
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
@@ -280,8 +280,6 @@ EPSW3           {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 ''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
-
-	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
 
 def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
 	font = pygame.font.SysFont(font_name, int(size))

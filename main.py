@@ -209,10 +209,10 @@ def set_single_step(val):
 	if single_step == val: return
 
 	single_step = val
-	step_bt['state'] = 'normal' if val else 'disabled'
-	if val: print_regs()
-	else:
-		threading.Thread(target = core_step_loop, daemon = True).start()
+	if val:
+		print_regs()
+		get_mem()
+	else: threading.Thread(target = core_step_loop, daemon = True).start()
 
 def open_popup(x):
 	try: rc_menu.tk_popup(x.x_root, x.y_root)
@@ -220,7 +220,6 @@ def open_popup(x):
 
 def core_step():
 	global ok
-
 
 	ok = False
 	ret_val = simu8.coreStep()
@@ -238,7 +237,6 @@ def core_step():
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 
-
 def core_step_loop():
 	while not single_step: core_step()
 
@@ -254,7 +252,7 @@ def print_regs():
 General registers:
 R0   R1   R2   R3   R4   R5   R6   R7
 ''' + '   '.join(f'{(gr.qrs[0] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
-
+ 
 R8   R9   R10  R11  R12  R13  R14  R15
 ''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
@@ -326,6 +324,7 @@ def exit_sim():
 	pygame.display.quit()
 	pygame.quit()
 	root.quit()
+	if os.name != 'nt': os.system('xset r on')
 	sys.exit()
 
 import platform
@@ -393,7 +392,6 @@ w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
 
 segment_var = tk.StringVar(); segment_var.set('Segment 0')
 segment_cb = ttk.Combobox(w_data_mem, textvariable = segment_var, values = [f'Segment {i}' for i in range(16)])
-segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
 segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
 segment_cb.pack()
 
@@ -518,11 +516,7 @@ def pygame_loop():
 reset_core()
 pygame_loop()
 
-style = ttk.Style()
-style.configure('Con.TButton', background = config.console_bg)
+root.bind('<KeyPress>', lambda x: set_step())
 
-step_bt = ttk.Button(root, text = 'Step', style = 'Con.TButton', command = set_step)
-step_bt.place(rely = 1.0, relx = 1.0, x = 0, y = 0, anchor = 'se')
-step_bt.focus_set()
-
+if os.name != 'nt': os.system('xset r off')
 root.mainloop()

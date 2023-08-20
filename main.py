@@ -122,9 +122,9 @@ def init_mem():
 	code_text['state'] = 'normal'
 	code_text.delete('1.0', 'end')
 	for i in range(0, 0x10000, 16):
-		string = f'{seg:X}:{i:04X}  ' + ('00 '*16) + '  ' + '.'*16 + '\n'
+		string = f'{seg:X}:{i:04X}  ' + ('?? '*16) + '  ' + '?'*16
 		data_cache[i // 16] = string
-		code_text.insert('end', string)
+		code_text.insert('end', string + '\n')
 	code_text.delete('end-1c', 'end')
 	code_text['state'] = 'disabled'
 
@@ -316,7 +316,7 @@ def get_scr_data(*scr_bytes):
 def reset_core():
 	simu8.coreReset()
 	print_regs()
-	init_mem()
+	get_mem()
 
 def exit_sim():
 	simu8.coreReset()
@@ -443,7 +443,7 @@ rc_menu.add_separator()
 rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = open_mem)
 rc_menu.add_separator()
 rc_menu.add_checkbutton(label = 'Show registers outside of single-step', accelerator = 'R', variable = show_regs)
-rc_menu.add_checkbutton(label = 'Display LCD', accelerator = 'D', variable = disp_lcd)
+rc_menu.add_checkbutton(label = 'Toggle LCD/buffer display (on: LCD, off: buffer)', accelerator = 'D', variable = disp_lcd)
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
 rc_menu.add_separator()
@@ -487,23 +487,18 @@ def pygame_loop():
 	clock.tick()
 
 	screen.fill((0, 0, 0))
-	if disp_lcd.get():
-		screen.blit(interface, interface_rect)
-		
-		if ok:
-			scr_bytes = [read_dmem(0xf000 + i*0x10, 0xc) for i in range(0x80, 0xa0)]
-			screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
+	screen.blit(interface, interface_rect)
+	
+	if ok:
+		scr_bytes = [read_dmem((0xf000 if disp_lcd.get() else 0x87d0) + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+		screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
-			for i in range(len(screen_data_status_bar)):
-				if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
+		for i in range(len(screen_data_status_bar)):
+			if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
 
-			for y in range(31):
-				for x in range(96):
-					if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
-
-	else:
-		draw_text('LCD is disabled.', 22, config.width // 2, config.height // 2 - 11, (255, 255, 255))
-		draw_text('To enable, press D or right-click > Display LCD.', 22, config.width // 2, config.height // 2 + 11, (255, 255, 255))
+		for y in range(31):
+			for x in range(96):
+				if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
 	if single_step: step = False
 	else:

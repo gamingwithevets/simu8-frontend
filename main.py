@@ -241,6 +241,8 @@ def core_step_loop():
 	while not single_step: core_step()
 
 def print_regs():
+	global prev_csr_pc
+
 	gr = get_var('GR', GR_t)
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
@@ -257,7 +259,7 @@ R8   R9   R10  R11  R12  R13  R14  R15
 ''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
-CSR:PC          {csr:02X}:{pc:04X}H
+CSR:PC          {csr:02X}:{pc:04X}H (prev. value: {prev_csr_pc})
 Words @ CSR:PC  {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
 SP              {sp:04X}H
 Words @ SP      ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
@@ -278,6 +280,8 @@ EPSW3           {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 ''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
+
+	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
 
 def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
 	font = pygame.font.SysFont(font_name, int(size))
@@ -470,6 +474,8 @@ root.bind('q', lambda x: exit_sim()); root.bind('Q', lambda x: exit_sim())
 single_step = ok = True
 step, brkpoint = False, None
 clock = pygame.time.Clock()
+
+prev_csr_pc = None
 
 def pygame_loop():
 	global single_step, step, brkpoint

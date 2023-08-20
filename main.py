@@ -80,8 +80,6 @@ def read_dmem(addr, num_bytes, segment = 0):
 		elif remaining >= 2: grab = 2
 		else: grab = 1
 
-		# wait until OK
-		while not ok: pass
 		simu8.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
 		dt = get_var('DataRaw', Data_t)
 		if grab == 8: dt_ = dt.qword

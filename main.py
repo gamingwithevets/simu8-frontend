@@ -490,7 +490,7 @@ def pygame_loop():
 	screen.blit(interface, interface_rect)
 	
 	draw_text(f'Displaying {"LCD" if disp_lcd.get() else "buffer"}', 22, config.width // 2, 22, config.pygame_color, anchor = 'midtop')
-	scr_bytes = [read_dmem((0xf000 if disp_lcd.get() else 0x87d0) + i*0x10, 0xc) for i in range(0x80, 0xa0)]
+	scr_bytes = [read_dmem(0xf800 + i*0x10 if disp_lcd.get() else 0x87d0 + i*0xc, 0xc) for i in range(0x20)]
 	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
 	for i in range(len(screen_data_status_bar)):
@@ -510,7 +510,7 @@ def pygame_loop():
 reset_core()
 pygame_loop()
 
-root.bind('<KeyPress>', lambda x: set_step())
+root.bind('<Return>', lambda x: set_step())
 
 if os.name != 'nt': os.system('xset r off')
 root.mainloop()

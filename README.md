@@ -30,7 +30,7 @@ These functions were originally from `testcore.c` and reimplemented in Python.
 To step, press any key (except the keys reserved for other functions). You can also hold down a key to run the emulator at a reasonable speed, though not as fast as when single-step mode is disabled.
 
 Note that when single-step mode is disabled, the screen and the memory shown in the data memory viewer may flicker.
-This is because screen data may be grabbed when SimU8's `coreStep` function is running.
+This is because data memory may be grabbed when SimU8's `coreStep` function is running.
 
 # Images
 This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).

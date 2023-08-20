@@ -65,6 +65,11 @@ def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 def get_var(var, typ): return typ.in_dll(simu8, var)
 
 def read_dmem(addr, num_bytes, segment = 0):
+	odd = addr % 2 != 0
+	if odd:
+		addr -= 1
+		num_bytes += 1
+
 	data = b''
 	bytes_grabbed = 0
 
@@ -84,7 +89,8 @@ def read_dmem(addr, num_bytes, segment = 0):
 		data += dt_.to_bytes(grab, 'little')
 		bytes_grabbed += grab
 
-	return data
+	if odd: return data[1:]
+	else: return data
 
 def read_cmem(addr, segment = 0):
 	simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
@@ -241,6 +247,7 @@ def print_regs():
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
 	sp = get_var('SP', ctypes.c_uint16).value
+	psw = get_var('PSW', PSW_t).field
 	info_label['text'] = f'''\
 === REGISTERS ===
 
@@ -252,23 +259,24 @@ R8   R9   R10  R11  R12  R13  R14  R15
 ''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
-CSR:PC                 {csr:02X}:{pc:04X}H
-Code words @ CSR:PC    {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
-SP                     {sp:04X}H
-Words at SP            ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
-                       ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
-DSR:EA                 {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
-PSW                    {get_var('PSW', PSW_t).raw:02X}  {get_var('PSW', PSW_t).raw:08b}
+CSR:PC          {csr:02X}:{pc:04X}H
+Words @ CSR:PC  {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
+SP              {sp:04X}H
+Words @ SP      ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
+                ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
+DSR:EA          {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
 
+                C Z S OV MIE HC ELEVEL
+PSW             {psw.C} {psw.Z} {psw.S}  {psw.OV}  {psw.MIE}   {psw.HC} {psw.ELevel:02b} ({psw.ELevel})
 
-LCSR:LR                {get_var('LCSR', ctypes.c_uint8).value:02X}:{get_var('LR', ctypes.c_uint16).value:04X}H
-ECSR1:ELR1             {get_var('ECSR1', ctypes.c_uint8).value:02X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
-ECSR2:ELR2             {get_var('ECSR2', ctypes.c_uint8).value:02X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
-ECSR3:ELR3             {get_var('ECSR3', ctypes.c_uint8).value:02X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
+LCSR:LR         {get_var('LCSR', ctypes.c_uint8).value:02X}:{get_var('LR', ctypes.c_uint16).value:04X}H
+ECSR1:ELR1      {get_var('ECSR1', ctypes.c_uint8).value:02X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
+ECSR2:ELR2      {get_var('ECSR2', ctypes.c_uint8).value:02X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
+ECSR3:ELR3      {get_var('ECSR3', ctypes.c_uint8).value:02X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
 
-EPSW1                  {get_var('EPSW1', PSW_t).raw:02X}
-EPSW2                  {get_var('EPSW2', PSW_t).raw:02X}
-EPSW3                  {get_var('EPSW3', PSW_t).raw:02X}
+EPSW1           {get_var('EPSW1', PSW_t).raw:02X}
+EPSW2           {get_var('EPSW2', PSW_t).raw:02X}
+EPSW3           {get_var('EPSW3', PSW_t).raw:02X}
 
 {'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 ''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'

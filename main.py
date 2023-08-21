@@ -105,8 +105,10 @@ def calc_checksum():
 	tk.messagebox.showinfo('Checksum', f'Expected checksum: {csum1:04X}\nCalculated checksum: {csum:04X}\n\n{"This looks like a good dump!" if csum == csum1 else "This is either a bad dump or an emulator ROM."}')
 
 def set_csr_pc():
-	get_var('CSR', ctypes.c_uint8).value = int(jump_csr_entry.get(), 16)
-	get_var('PC', ctypes.c_uint16).value = int(jump_pc_entry.get(), 16)
+	csr_entry = jump_csr_entry.get()
+	pc_entry = jump_pc_entry.get()
+	get_var('CSR', ctypes.c_uint8).value = int(csr_entry, 16) if csr_entry else 0
+	get_var('PC', ctypes.c_uint16).value = int(pc_entry, 16) if pc_entry else 0
 	print_regs()
 	w_jump.withdraw()
 
@@ -187,7 +189,9 @@ def format_mem(seg, data, addr):
 def set_brkpoint():
 	global brkpoint
 
-	brkpoint = (int(brkpoint_csr_entry.get(), 16) << 16) + int(brkpoint_pc_entry.get(), 16)
+	csr_entry = brkpoint_csr_entry.get()
+	pc_entry = brkpoint_pc_entry.get()
+	brkpoint = ((int(csr_entry, 16) if csr_entry else 0) << 16) + (int(pc_entry, 16) if pc_entry else 0)
 	print_regs()
 	w_brkpoint.withdraw()
 
@@ -221,11 +225,13 @@ def open_popup(x):
 def core_step():
 	global ok, prev_csr_pc
 
+	csr = get_var('CSR', ctypes.c_uint8).value
+	pc = get_var('PC', ctypes.c_uint16).value
+	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
+
 	ok = False
 	ret_val = simu8.coreStep()
 	ok = True
-	csr = get_var('CSR', ctypes.c_uint8).value
-	pc = get_var('PC', ctypes.c_uint16).value
 	if (csr << 16) + pc == brkpoint:
 		tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:02X}:{pc:04X}H has been hit!')
 		set_single_step(True)
@@ -237,12 +243,13 @@ def core_step():
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
 
-	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
 
 def core_step_loop():
 	while not single_step: core_step()
 
 def print_regs():
+	global prev_csr_pc
+
 	gr = get_var('GR', GR_t)
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
@@ -316,7 +323,11 @@ def get_scr_data(*scr_bytes):
 	return screen_data_status_bar, screen_data
 
 def reset_core():
+	global prev_csr_pc
+
+	simu8.coreZero()
 	simu8.coreReset()
+	prev_csr_pc = None
 	print_regs()
 	get_mem()
 

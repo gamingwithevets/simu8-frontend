@@ -121,14 +121,6 @@ def init_mem():
 
 	seg = int(segment_var.get().split()[1])
 
-	code_text['state'] = 'normal'
-	code_text.delete('1.0', 'end')
-	for i in range(0, 0x10000, 16):
-		string = f'{seg:X}:{i:04X}  ' + ('?? '*16) + '  ' + '?'*16
-		data_cache[i // 16] = string
-		code_text.insert('end', string + '\n')
-	code_text.delete('end-1c', 'end')
-	code_text['state'] = 'disabled'
 
 def open_mem():
 	get_mem()
@@ -138,53 +130,31 @@ def sb_yview(*args):
 	code_text.yview(*args)
 	get_mem()
 
-line_count = 50
 def get_mem():
 	if not ok: return
 
 	global data_cache
 
-	seg = int(segment_var.get().split()[1])
+	rang = (0x8000, 0xe00) if segment_var.get().split()[0] == 'RAM' else (0xf000, 0x1000)
 
 	code_text['state'] = 'normal'
-	yview = code_text.yview()
-
-	if single_step:
-		data_str = format_mem(seg, read_dmem(0, 0x10000, seg), 0)
-		data_cache = data_str
-		code_text.delete('1.0', 'end')
-		code_text.insert('end', '\n'.join(data_str.values()) + '\n')
-	else:
-		sl = int(yview[0] * 4096)
-		addr = sl * 16
-		if addr + line_count*16 > 0x10000: lines = 4096 - sl
-		else: lines = line_count
-
-		data_str = format_mem(seg, read_dmem(addr, lines*16, seg), addr)
-		for k, v in data_str.items():
-			if data_cache[k] != v:
-				code_text.delete(f'{k+1}.0', f'{k+2}.0')
-				if code_text.get('end-2c', 'end-1c') != '\n': code_text.insert('end', '\n')
-				code_text.insert(f'{k+1}.0', v + '\n')
-				data_cache[k] = v
-	code_text.delete('end-1c', 'end')
-
-	code_text.yview_moveto(yview[0])
+	yview_bak = code_text.yview()[0]
+	code_text.delete('1.0', 'end')
+	code_text.insert('end', format_mem(read_dmem(*rang), rang[0]))
+	code_text.yview_moveto(str(yview_bak))
 	code_text['state'] = 'disabled'
 
-	root.update_idletasks()
-
 @functools.lru_cache
-def format_mem(seg, data, addr):
+def format_mem(data, addr):
 	lines = {}
 	j = addr // 16
 	for i in range(addr, addr + len(data), 16):
 		line = ''
 		line_ascii = ''
 		for byte in data[i-addr:i-addr+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines[j] = f'{seg:X}:{i % 0x10000:04X}  {line}  {line_ascii}'
+		lines[j] = f'00:{i % 0x10000:04X}  {line}  {line_ascii}'
 		j += 1
-	return lines
+	return '\n'.join(lines.values())
 
 def set_brkpoint():
 	global brkpoint
@@ -225,23 +195,23 @@ def open_popup(x):
 def core_step():
 	global ok, prev_csr_pc
 
-	csr = get_var('CSR', ctypes.c_uint8).value
-	pc = get_var('PC', ctypes.c_uint16).value
-	prev_csr_pc = f'{csr:02X}:{pc:04X}H'
+	prev_csr_pc = f"{get_var('CSR', ctypes.c_uint8).value:X}:{get_var('PC', ctypes.c_uint16).value:04X}H"
 
 	ok = False
 	ret_val = simu8.coreStep()
 	ok = True
+	csr = get_var('CSR', ctypes.c_uint8).value
+	pc = get_var('PC', ctypes.c_uint16).value
 	if (csr << 16) + pc == brkpoint:
-		tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:02X}:{pc:04X}H has been hit!')
+		tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:X}:{pc:04X}H has been hit!')
 		set_single_step(True)
 	if ret_val == 3:
 		dnl = '\n\n'
-		logging.error(f'Illegal instruction found @ CSR:PC = {csr:02X}:{pc:04X}H')
-		tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:02X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
+		logging.error(f'Illegal instruction found @ CSR:PC = {csr:X}:{pc:04X}H')
+		tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
 		set_single_step(True)
-	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:02X}:{pc:04X}H')
-	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:01X}{(pc - 2) & 0xffff:04X}H')
+	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:X}:{pc:04X}H')
+	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:X}{(pc - 2) & 0xffff:04X}H')
 
 
 def core_step_loop():
@@ -254,7 +224,9 @@ def print_regs():
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
 	sp = get_var('SP', ctypes.c_uint16).value
-	psw = get_var('PSW', PSW_t).field
+	psw_var = get_var('PSW', PSW_t)
+	psw = psw_var.field
+	psw_val = psw_var.raw
 	info_label['text'] = f'''\
 === REGISTERS ===
 
@@ -266,20 +238,20 @@ R8   R9   R10  R11  R12  R13  R14  R15
 ''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
-CSR:PC          {csr:02X}:{pc:04X}H (prev. value: {prev_csr_pc})
+CSR:PC          {csr:X}:{pc:04X}H (prev. value: {prev_csr_pc})
 Words @ CSR:PC  {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
 SP              {sp:04X}H
 Words @ SP      ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
                 ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
-DSR:EA          {get_var('DSR', ctypes.c_uint8).value:01X}:{get_var('EA', ctypes.c_uint16).value:04X}H
+DSR:EA          {get_var('DSR', ctypes.c_uint8).value:02X}:{get_var('EA', ctypes.c_uint16).value:04X}H
 
-                C Z S OV MIE HC ELEVEL
-PSW             {psw.C} {psw.Z} {psw.S}  {psw.OV}  {psw.MIE}   {psw.HC} {psw.ELevel:02b} ({psw.ELevel})
+                   C Z S OV MIE HC ELEVEL
+PSW             {psw_val:02X} {psw.C} {psw.Z} {psw.S}  {psw.OV}  {psw.MIE}   {psw.HC} {psw.ELevel:02b} ({psw.ELevel})
 
-LCSR:LR         {get_var('LCSR', ctypes.c_uint8).value:02X}:{get_var('LR', ctypes.c_uint16).value:04X}H
-ECSR1:ELR1      {get_var('ECSR1', ctypes.c_uint8).value:02X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
-ECSR2:ELR2      {get_var('ECSR2', ctypes.c_uint8).value:02X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
-ECSR3:ELR3      {get_var('ECSR3', ctypes.c_uint8).value:02X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
+LCSR:LR         {get_var('LCSR', ctypes.c_uint8).value:X}:{get_var('LR', ctypes.c_uint16).value:04X}H
+ECSR1:ELR1      {get_var('ECSR1', ctypes.c_uint8).value:X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
+ECSR2:ELR2      {get_var('ECSR2', ctypes.c_uint8).value:X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
+ECSR3:ELR3      {get_var('ECSR3', ctypes.c_uint8).value:X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
 
 EPSW1           {get_var('EPSW1', PSW_t).raw:02X}
 EPSW2           {get_var('EPSW2', PSW_t).raw:02X}
@@ -328,6 +300,7 @@ def reset_core():
 	simu8.coreZero()
 	simu8.coreReset()
 	prev_csr_pc = None
+	set_single_step(True)
 	print_regs()
 	get_mem()
 
@@ -403,8 +376,8 @@ w_data_mem.resizable(False, False)
 w_data_mem.title('Show data memory')
 w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
 
-segment_var = tk.StringVar(); segment_var.set('Segment 0')
-segment_cb = ttk.Combobox(w_data_mem, textvariable = segment_var, values = [f'Segment {i}' for i in range(16)])
+segment_var = tk.StringVar(); segment_var.set('RAM (00:8000H - 00:8DFFH)')
+segment_cb = ttk.Combobox(w_data_mem, width = 20, textvariable = segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
 segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
 segment_cb.pack()
 

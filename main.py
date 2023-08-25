@@ -116,11 +116,6 @@ def set_csr_pc():
 	jump_pc_entry.delete(0, 'end')
 
 data_cache = {}
-def init_mem():
-	global data_cache
-
-	seg = int(segment_var.get().split()[1])
-
 
 def open_mem():
 	get_mem()
@@ -130,9 +125,7 @@ def sb_yview(*args):
 	code_text.yview(*args)
 	get_mem()
 
-def get_mem():
-	if not ok: return
-
+def get_mem(keep_yview = True):
 	global data_cache
 
 	rang = (0x8000, 0xe00) if segment_var.get().split()[0] == 'RAM' else (0xf000, 0x1000)
@@ -141,7 +134,7 @@ def get_mem():
 	yview_bak = code_text.yview()[0]
 	code_text.delete('1.0', 'end')
 	code_text.insert('end', format_mem(read_dmem(*rang), rang[0]))
-	code_text.yview_moveto(str(yview_bak))
+	if keep_yview: code_text.yview_moveto(str(yview_bak))
 	code_text['state'] = 'disabled'
 
 @functools.lru_cache
@@ -377,8 +370,8 @@ w_data_mem.title('Show data memory')
 w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
 
 segment_var = tk.StringVar(); segment_var.set('RAM (00:8000H - 00:8DFFH)')
-segment_cb = ttk.Combobox(w_data_mem, width = 20, textvariable = segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
-segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem())
+segment_cb = ttk.Combobox(w_data_mem, width = 30, textvariable = segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
+segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem(False))
 segment_cb.pack()
 
 code_frame = ttk.Frame(w_data_mem)

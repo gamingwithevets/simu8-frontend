@@ -80,8 +80,7 @@ def read_dmem(addr, num_bytes, segment = 0):
 		elif remaining >= 2: grab = 2
 		else: grab = 1
 
-		simu8.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
-		dt = get_var('DataRaw', Data_t)
+		dt = simu8.memoryGetData_raw(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
 		if grab == 8: dt_ = dt.qword
 		elif grab == 4: dt_ = dt.dword
 		elif grab == 2: dt_ = dt.word
@@ -206,7 +205,6 @@ def core_step():
 	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:X}:{pc:04X}H')
 	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:X}{(pc - 2) & 0xffff:04X}H')
 
-
 def core_step_loop():
 	while not single_step: core_step()
 
@@ -290,7 +288,7 @@ def get_scr_data(*scr_bytes):
 def reset_core():
 	global prev_csr_pc
 
-	simu8.coreZero()
+	#simu8.coreZero()
 	simu8.coreReset()
 	prev_csr_pc = None
 	set_single_step(True)
@@ -316,6 +314,7 @@ if pygame.version.vernum < (2, 2, 0):
 	sys.exit()
 
 simu8 = ctypes.CDLL(os.path.abspath(config.shared_lib))
+simu8.memoryGetData_raw.restype = Data_t
 
 root = tk.Tk()
 root.geometry(f'{config.width*2}x{config.height}')

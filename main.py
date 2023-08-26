@@ -9,6 +9,7 @@ import threading
 import traceback
 import tkinter as tk
 import tkinter.ttk as ttk
+import tkinter.font
 import tkinter.messagebox
 
 import config
@@ -91,6 +92,10 @@ def read_dmem(addr, num_bytes, segment = 0):
 	if odd: return data[1:]
 	else: return data
 
+def write_dmem(addr, byte, segment = 0):
+	data = Data_t(); data.raw = byte
+	simu8.memorySetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr), ctypes.c_size_t(1), data)
+
 def read_cmem(addr, segment = 0):
 	simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
 	return get_var('CodeWord', ctypes.c_uint16).value
@@ -164,6 +169,19 @@ def clear_brkpoint():
 	global brkpoint
 	brkpoint = None
 	print_regs()
+
+def write():
+	seg = write_csr_entry.get(); seg = int(seg, 16) if seg else 0
+	adr = write_pc_entry.get(); adr = int(adr, 16) if adr else 0
+	byte = write_byte_entry.get(); byte = int(byte, 16) if byte else 0
+	write_dmem(adr, byte, seg)
+	print_regs()
+	get_mem()
+	w_write.withdraw()
+
+	write_csr_entry.delete(0, 'end'); write_csr_entry.insert(0, '0')
+	write_pc_entry.delete(0, 'end')
+	write_byte_entry.delete(0, 'end'); write_byte_entry.insert(0, '0')
 
 def set_step():
 	global step
@@ -333,7 +351,7 @@ w_jump_vh_reg = w_jump.register(validate_hex)
 ttk.Label(w_jump, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
 jump_csr = tk.Frame(w_jump); jump_csr.pack(fill = 'x')
 ttk.Label(jump_csr, text = 'CSR').pack(side = 'left')
-jump_csr_entry = ttk.Entry(jump_csr, validate = 'key', validatecommand = (w_jump_vh_reg, 2, '%S', '%P', '%d')); jump_csr_entry.pack(side = 'right')
+jump_csr_entry = ttk.Entry(jump_csr, validate = 'key', validatecommand = (w_jump_vh_reg, 1, '%S', '%P', '%d')); jump_csr_entry.pack(side = 'right')
 jump_csr_entry.insert(0, '0')
 jump_pc = tk.Frame(w_jump); jump_pc.pack(fill = 'x')
 ttk.Label(jump_pc, text = 'PC').pack(side = 'left')
@@ -352,7 +370,7 @@ w_brkpoint_vh_reg = w_brkpoint.register(validate_hex)
 ttk.Label(w_brkpoint, text = 'Single-step mode will be activated if CSR:PC matches\nthe below. Note that only 1 breakpoint can be set.\n(please input hex bytes)', justify = 'center').pack()
 brkpoint_csr = tk.Frame(w_brkpoint); brkpoint_csr.pack(fill = 'x')
 ttk.Label(brkpoint_csr, text = 'CSR').pack(side = 'left')
-brkpoint_csr_entry = ttk.Entry(brkpoint_csr, validate = 'key', validatecommand = (w_brkpoint_vh_reg, 2, '%S', '%P', '%d')); brkpoint_csr_entry.pack(side = 'right')
+brkpoint_csr_entry = ttk.Entry(brkpoint_csr, validate = 'key', validatecommand = (w_brkpoint_vh_reg, 1, '%S', '%P', '%d')); brkpoint_csr_entry.pack(side = 'right')
 brkpoint_csr_entry.insert(0, '0')
 brkpoint_pc = tk.Frame(w_brkpoint); brkpoint_pc.pack(fill = 'x')
 ttk.Label(brkpoint_pc, text = 'PC').pack(side = 'left')
@@ -360,6 +378,34 @@ brkpoint_pc_entry = ttk.Entry(brkpoint_pc, validate = 'key', validatecommand = (
 ttk.Button(w_brkpoint, text = 'OK', command = set_brkpoint).pack(side = 'bottom')
 w_brkpoint.bind('<Return>', lambda x: set_brkpoint())
 w_brkpoint.bind('<Escape>', lambda x: w_brkpoint.withdraw())
+
+tk_font = tk.font.nametofont('TkDefaultFont')
+bold_italic_font = tk_font.copy()
+bold_italic_font.config(weight = 'bold', slant = 'italic')
+
+w_write = tk.Toplevel(root)
+w_write.withdraw()
+w_write.geometry('375x175')
+w_write.resizable(False, False)
+w_write.title('Write-A-Byte™')
+w_write.protocol('WM_DELETE_WINDOW', w_write.withdraw)
+w_write_vh_reg = w_write.register(validate_hex)
+ttk.Label(w_write, text = 'Write a byte to data memory, completely FREE OF CHARGE!\n(Totally) Licensed by LAPIS Semiconductor Co., Ltd.', font = bold_italic_font, justify = 'center').pack()
+ttk.Label(w_write, text = 'You have null days left before activation is required.\n(please input hex bytes)', justify = 'center').pack()
+write_csr = tk.Frame(w_write); write_csr.pack(fill = 'x')
+ttk.Label(write_csr, text = 'Segment').pack(side = 'left')
+write_csr_entry = ttk.Entry(write_csr, validate = 'key', validatecommand = (w_write_vh_reg, 2, '%S', '%P', '%d')); write_csr_entry.pack(side = 'right')
+write_csr_entry.insert(0, '0')
+write_pc = tk.Frame(w_write); write_pc.pack(fill = 'x')
+ttk.Label(write_pc, text = 'Address').pack(side = 'left')
+write_pc_entry = ttk.Entry(write_pc, validate = 'key', validatecommand = (w_write_vh_reg, 4, '%S', '%P', '%d')); write_pc_entry.pack(side = 'right')
+write_byte = tk.Frame(w_write); write_byte.pack(fill = 'x')
+ttk.Label(write_byte, text = 'Byte').pack(side = 'left')
+write_byte_entry = ttk.Entry(write_byte, validate = 'key', validatecommand = (w_write_vh_reg, 2, '%S', '%P', '%d')); write_byte_entry.pack(side = 'right')
+write_byte_entry.insert(0, '0')
+ttk.Button(w_write, text = 'OK', command = write).pack(side = 'bottom')
+w_write.bind('<Return>', lambda x: write())
+w_write.bind('<Escape>', lambda x: w_write.withdraw())
 
 w_data_mem = tk.Toplevel(root)
 w_data_mem.withdraw()
@@ -411,7 +457,7 @@ disp_lcd = tk.BooleanVar(value = True)
 
 rc_menu = tk.Menu(root, tearoff = 0)
 rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
-rc_menu.add_command(label = 'Resume execution', accelerator = 'P', command = lambda: set_single_step(False))
+rc_menu.add_command(label = 'Resume execution (unpause)', accelerator = 'P', command = lambda: set_single_step(False))
 rc_menu.add_separator()
 rc_menu.add_command(label = 'Jump to...', accelerator = 'J', command = w_jump.deiconify)
 rc_menu.add_separator()
@@ -428,6 +474,7 @@ rc_menu.add_separator()
 
 extra_funcs = tk.Menu(rc_menu, tearoff = 0)
 extra_funcs.add_command(label = 'Calculate checksum', command = calc_checksum)
+extra_funcs.add_command(label = 'Write-A-Byte™', command = w_write.deiconify)
 rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
 
 rc_menu.add_separator()

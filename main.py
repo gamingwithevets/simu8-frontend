@@ -266,7 +266,7 @@ EPSW1           {get_var('EPSW1', PSW_t).raw:02X}
 EPSW2           {get_var('EPSW2', PSW_t).raw:02X}
 EPSW3           {get_var('EPSW3', PSW_t).raw:02X}
 
-{'Breakpoint set to ' + format(brkpoint >> 16, '02X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
+{'Breakpoint set to ' + format(brkpoint >> 16, 'X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
 ''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
 
 def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):

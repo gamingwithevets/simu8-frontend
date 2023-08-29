@@ -50,6 +50,210 @@ class PSW_t(ctypes.Union):
 		('field', PSW_t_field),
 	]
 
+# https://github.com/JamesGKent/python-tkwidgets/blob/master/Debounce.py
+class Debounce():
+	'''
+	When holding a key down, multiple key press and key release events are fired in
+	succession. Debouncing is implemented in order to squash these repeated events
+	and know when the "real" KeyRelease and KeyPress events happen.
+	Use by subclassing a tkinter widget along with this class:
+		class DebounceTk(Debounce, tk.Tk):
+			pass
+	'''
+	
+	# use classname as key to store class bindings
+	# as single dict for all instances
+	_bind_class_dict = {}
+	
+	# 'all' bindings stored here
+	# single dict for all instances
+	_bind_all_dict = {}
+	
+	def bind(self, event, function, debounce=True):
+		'''
+		Override the bind method, acts as normal binding if not KeyPress or KeyRelease
+		type events, optional debounce parameter can be set to false to force normal behavior
+		'''
+		self._debounce_init()
+		self._debounce_bind(event, function, debounce,
+			self._binding_dict, self._base.bind)
+			
+	def bind_all(self, event, function, debounce=True):
+		'''
+		Override the bind_all method, acts as normal binding if not KeyPress or KeyRelease
+		type events, optional debounce parameter can be set to false to force normal behavior
+		'''
+		self._debounce_init()
+		self._debounce_bind(event, function, debounce,
+			self._bind_all_dict, self._base.bind_all)
+		
+	def bind_class(self, event, function, debounce=True):
+		'''
+		Override the bind_class method, acts as normal binding if not KeyPress or KeyRelease
+		type events, optional debounce parameter can be set to false to force normal behavior
+		unlike underlying tk bind_class this uses name of class on which its called
+		instead of requireing clas name as a parameter
+		'''
+		self._debounce_init()
+		self._debounce_bind(event, function, debounce,
+			self._bind_class_dict[self.__class__.__name__],
+			self._base.bind_class, self.__class__.__name__)
+			
+	def _debounce_bind(self, event, function, debounce, bind_dict, bind_method, *args):
+		'''
+		internal method to implement binding
+		'''
+		self._debounce_init()
+		# remove special symbols and split at first hyphen if present
+		ev = event.replace("<", "").replace(">", "").split('-', 1)
+		# if debounce and a supported event
+		if (('KeyPress' in ev) or ('KeyRelease' in ev)) and debounce:
+			if len(ev) == 2: # not generic binding so use keynames as key
+				evname = ev[1]
+			else: # generic binding, use event type
+				evname = ev[0]
+			if evname in bind_dict: # if have prev binding use that dict
+				d = bind_dict[evname]
+			else: # no previous binding, create new default dict
+				d = {'has_prev_key_release':None, 'has_prev_key_press':False}
+
+			# add function to dict (as keypress or release depending on name)
+			d[ev[0]] = function
+			# save binding back into dict
+			bind_dict[evname] = d
+			# call base class binding
+			if ev[0] == 'KeyPress':
+				bind_method(self, *args, sequence=event, func=self._on_key_press_repeat)
+			elif ev[0] == 'KeyRelease':
+				bind_method(self, *args, sequence=event, func=self._on_key_release_repeat)
+				
+		else: # not supported or not debounce, bind as normal
+			bind_method(self, *args, sequence=event, func=function)
+			
+	def _debounce_init(self):
+		# get first base class that isn't Debounce and save ref
+		# this will be used for underlying bind methods
+		if not hasattr(self, '_base'):
+			for base in self.__class__.__bases__:
+				if base.__name__ != 'Debounce':
+					self._base = base
+					break
+		# for instance bindings
+		if not hasattr(self, '_binding_dict'):
+			self._binding_dict = {}
+			
+		# for class bindings
+		try: # check if this class has alread had class bindings
+			cd = self._bind_class_dict[self.__class__.__name__]
+		except KeyError: # create dict to store if not
+			self._bind_class_dict[self.__class__.__name__] = {}
+			
+		# get the current bind tags
+		bindtags = list(self.bindtags())
+		# add our custom bind tag before the origional bind tag
+		index = bindtags.index(self._base.__name__)
+		bindtags.insert(index, self.__class__.__name__)
+		# save the bind tags back to the widget
+		self.bindtags(tuple(bindtags))
+			
+	def _get_evdict(self, event):
+		'''
+		internal method used to get the dictionaries that store the special binding info
+		'''
+		dicts = []
+		names = {'2':'KeyPress', '3':'KeyRelease'}
+		# loop through all applicable bindings
+		for d in [self._binding_dict, # instance binding
+			self._bind_class_dict[self.__class__.__name__], # class
+			self._bind_all_dict]: # all
+			evdict = None
+			generic = False
+			if event.type in names: # if supported event
+				evname = event.keysym
+				if evname not in d: # if no specific binding
+					generic = True
+					evname = names[event.type]
+				try:
+					evdict = d[evname]
+				except KeyError:
+					pass
+			if evdict: # found a binding
+				dicts.append((d, evdict, generic))
+		return dicts
+		
+	def _on_key_release(self, event):
+		'''
+		internal method, called by _on_key_release_repeat only when key is actually released
+		this then calls the method that was passed in to the bind method
+		'''
+		# get all binding details
+		for d, evdict, generic in self._get_evdict(event):
+			# call callback
+			res = evdict['KeyRelease'](event)
+			evdict['has_prev_key_release'] = None
+			
+			# record that key was released
+			if generic:
+				d['KeyPress'][event.keysym] = False
+			else:
+				evdict['has_prev_key_press'] = False
+			# if supposed to break propagate this up
+			if res == 'break':
+				return 'break'
+		
+	def _on_key_release_repeat(self, event):
+		'''
+		internal method, called by the 'KeyRelease' event, used to filter false events
+		'''
+		# get all binding details
+		for d, evdict, generic in self._get_evdict(event):
+			if evdict["has_prev_key_release"]:
+				# got a previous release so cancel it
+				self.after_cancel(evdict["has_prev_key_release"])
+				evdict["has_prev_key_release"] = None
+			# queue new event for key release
+			evdict["has_prev_key_release"] = self.after_idle(self._on_key_release, event)
+		
+	def _on_key_press(self, event):
+		'''
+		internal method, called by _on_key_press_repeat only when key is actually pressed
+		this then calls the method that was passed in to the bind method
+		'''
+		# get all binding details
+		for d, evdict, generic in self._get_evdict(event):
+			# call callback
+			res = evdict['KeyPress'](event)
+			# record that key was pressed
+			if generic:
+				evdict[event.keysym] = True
+			else:
+				evdict['has_prev_key_press'] = True
+			# if supposed to break propagate this up
+			if res == 'break':
+				return 'break'
+		
+	def _on_key_press_repeat(self, event):
+		'''
+		internal method, called by the 'KeyPress' event, used to filter false events
+		'''
+		# get binding details
+		for d, evdict, generic in self._get_evdict(event):
+			if not generic:
+				if evdict["has_prev_key_release"]:
+					# got a previous release so cancel it
+					self.after_cancel(evdict["has_prev_key_release"])
+					evdict["has_prev_key_release"] = None
+				else:
+					# if not pressed before (real event)
+					if evdict['has_prev_key_press'] == False:
+						self._on_key_press(event)
+			else:
+				# if not pressed before (real event)
+				if (event.keysym not in evdict) or (evdict[event.keysym] == False):
+					self._on_key_press(event)
+
+class DebounceTk(Debounce, tk.Tk): pass
+
 def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
 	max_chars, act_code = int(max_chars), int(act_code)
 	if rang: rang = eval(rang)
@@ -208,7 +412,27 @@ def core_step():
 	prev_csr_pc = f"{get_var('CSR', ctypes.c_uint8).value:X}:{get_var('PC', ctypes.c_uint16).value:04X}H"
 
 	ok = False
-	ret_val = simu8.coreStep()
+	try: ret_val = simu8.coreStep()
+	except OSError: ret_val = 0
+
+	ki = 0xff
+	ko = read_dmem(0xf046, 1)[0]
+	try:
+		press = pygame.mouse.get_pressed()[0]
+		pos = pygame.mouse.get_pos()
+		for k, v in config.keymap_mouse.items():
+			if press and pos[0] in range(k[0], k[0]+k[2]) and pos[1] in range(k[1], k[1]+k[3]):
+				if v is None: reset_core(False)
+				elif ko & (1 << v[1]): ki &= ~(1 << v[0])
+		
+	except pygame.error: pass
+	finally:
+		for k in keys_pressed:
+			v = config.keymap_kb[k]
+			if v is None: reset_core(False)
+			elif ko & (1 << v[1]): ki &= ~(1 << v[0])
+		write_dmem(0xf040, ki)
+
 	ok = True
 	csr = get_var('CSR', ctypes.c_uint8).value
 	pc = get_var('PC', ctypes.c_uint16).value
@@ -303,13 +527,13 @@ def get_scr_data(*scr_bytes):
 
 	return screen_data_status_bar, screen_data
 
-def reset_core():
+def reset_core(single_step = True):
 	global prev_csr_pc
 
-	#simu8.coreZero()
+	simu8.coreZero()
 	simu8.coreReset()
 	prev_csr_pc = None
-	set_single_step(True)
+	set_single_step(single_step)
 	print_regs()
 	get_mem()
 
@@ -334,12 +558,16 @@ if pygame.version.vernum < (2, 2, 0):
 simu8 = ctypes.CDLL(os.path.abspath(config.shared_lib))
 simu8.memoryGetData_raw.restype = Data_t
 
-root = tk.Tk()
+root = DebounceTk()
 root.geometry(f'{config.width*2}x{config.height}')
 root.resizable(False, False)
 root.title(config.root_w_name)
-root.focus_set()
+root.protocol('WM_DELETE_WINDOW', exit_sim)
 root['bg'] = config.console_bg
+
+keys_pressed = []
+root.bind('<KeyPress>', lambda x: keys_pressed.append(x.keysym.lower()) if x.keysym.lower() in config.keymap_kb.keys() else 'break')
+root.bind('<KeyRelease>', lambda x: keys_pressed.remove(x.keysym.lower()) if x.keysym.lower() in keys_pressed else 'break')
 
 w_jump = tk.Toplevel(root)
 w_jump.withdraw()
@@ -429,6 +657,7 @@ code_frame.pack(fill = 'both', expand = True)
 
 embed_pygame = tk.Frame(root, width = config.width, height = config.height)
 embed_pygame.pack(side = 'left')
+embed_pygame.focus_set()
 
 info_label = tk.Label(root, text = 'Loading...', width = config.width, height = config.height, font = config.console_font, fg = config.console_fg, bg = config.console_bg, justify = 'left', anchor = 'nw')
 info_label.pack(side = 'left')
@@ -436,7 +665,6 @@ info_label.pack(side = 'left')
 os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())
 os.environ['SDL_VIDEODRIVER'] = 'windib' if os.name == 'nt' else 'x11'
 pygame.init()
-pygame.display.init()
 screen = pygame.display.set_mode()
 
 interface = pygame.image.load(config.interface_path)
@@ -493,7 +721,8 @@ root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
 root.bind('q', lambda x: exit_sim()); root.bind('Q', lambda x: exit_sim())
 
 single_step = ok = True
-step, brkpoint = False, None
+step = False
+brkpoint = None
 clock = pygame.time.Clock()
 
 prev_csr_pc = None
@@ -502,9 +731,6 @@ def pygame_loop():
 	global single_step, step, brkpoint
 
 	screen.fill((0, 0, 0))
-
-	for event in pygame.event.get():
-		if event.type == pygame.QUIT: exit_sim()
 
 	if single_step and step: core_step()
 	if (single_step and step) or not single_step:
@@ -527,6 +753,7 @@ def pygame_loop():
 		for x in range(96):
 			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
 
+
 	if single_step: step = False
 	else: draw_text(f'{clock.get_fps():.1f} FPS', 22, config.width // 2, 44, config.pygame_color, anchor = 'midtop')
 
@@ -537,7 +764,7 @@ def pygame_loop():
 reset_core()
 pygame_loop()
 
-root.bind('<Return>', lambda x: set_step())
+root.bind('\\', lambda x: set_step())
 
 if os.name != 'nt': os.system('xset r off')
 root.mainloop()

@@ -32,6 +32,8 @@ To step, press any key (except the keys reserved for other functions). You can a
 Note that when single-step mode is disabled, the screen and the memory shown in the data memory viewer may flicker.
 This is because data memory may be grabbed when SimU8's `coreStep` function is running.
 
+Also note that the frontend uses a function that doesn't exist in the main SimU8 code, and only exists in my fork. You may need to modify the frontend code if you want to use LifeEmu's SimU8 code.
+
 # Images
 This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).
 - For the interface, you need to extract bitmap **3001** from the emulator **DLL**.

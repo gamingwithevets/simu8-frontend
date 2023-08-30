@@ -301,8 +301,10 @@ def write_dmem(addr, byte, segment = 0):
 	simu8.memorySetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr), ctypes.c_size_t(1), data)
 
 def read_cmem(addr, segment = 0):
-	simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
-	return get_var('CodeWord', ctypes.c_uint16).value
+	try:
+		simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
+		return get_var('CodeWord', ctypes.c_uint16).value
+	except OSError: return 0
 
 def calc_checksum():
 	csum = 0
@@ -413,25 +415,27 @@ def core_step():
 
 	ok = False
 	try: ret_val = simu8.coreStep()
-	except OSError: ret_val = 0
+	except OSError as e: logging.error(e)
 
 	ki = 0xff
 	ko = read_dmem(0xf046, 1)[0]
 	try:
 		press = pygame.mouse.get_pressed()[0]
-		pos = pygame.mouse.get_pos()
-		for k, v in config.keymap_mouse.items():
-			if press and pos[0] in range(k[0], k[0]+k[2]) and pos[1] in range(k[1], k[1]+k[3]):
-				if v is None: reset_core(False)
-				elif ko & (1 << v[1]): ki &= ~(1 << v[0])
-		
-	except pygame.error: pass
-	finally:
-		for k in keys_pressed:
-			v = config.keymap_kb[k]
-			if v is None: reset_core(False)
-			elif ko & (1 << v[1]): ki &= ~(1 << v[0])
-		write_dmem(0xf040, ki)
+		video_inited = True
+	except pygame.error:
+		press = False
+		video_inited = False
+
+	pos = pygame.mouse.get_pos() if video_inited else (0, 0)
+
+	key_pressed = False
+	for k, v in config.keymap.items():
+		p = v[0]
+		if (press and pos[0] in range(p[0], p[0]+p[2]) and pos[1] in range(p[1], p[1]+p[3])) or (v[1] in keys_pressed or v[2] in keys_pressed):
+			if k is None: reset_core(False)
+			elif ko & (1 << k[1]): ki &= ~(1 << k[0])
+	
+	write_dmem(0xf040, ki)
 
 	ok = True
 	csr = get_var('CSR', ctypes.c_uint8).value
@@ -502,25 +506,26 @@ def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, ancho
 
 @functools.lru_cache
 def get_scr_data(*scr_bytes):
+	sbar = scr_bytes[0]
 	screen_data_status_bar = [
-	scr_bytes[0][0] & (1 << 4),    # [S]
-	scr_bytes[0][0] & (1 << 2),    # [A]
-	scr_bytes[0][1] & (1 << 4),    # M
-	scr_bytes[0][1] & (1 << 1),    # STO
-	scr_bytes[0][2] & (1 << 6),    # RCL
-	scr_bytes[0][3] & (1 << 6),    # STAT
-	scr_bytes[0][4] & (1 << 7),    # CMPLX
-	scr_bytes[0][5] & (1 << 6),    # MAT
-	scr_bytes[0][5] & (1 << 1),    # VCT
-	scr_bytes[0][7] & (1 << 5),    # [D]
-	scr_bytes[0][7] & (1 << 1),    # [R]
-	scr_bytes[0][8] & (1 << 4),    # [G]
-	scr_bytes[0][8] & (1 << 0),    # FIX
-	scr_bytes[0][9] & (1 << 5),    # SCI
-	scr_bytes[0][0xa] & (1 << 6),  # Math
-	scr_bytes[0][0xa] & (1 << 3),  # v
-	scr_bytes[0][0xb] & (1 << 7),  # ^
-	scr_bytes[0][0xb] & (1 << 4),  # Disp
+	sbar[0]   & (1 << 4),  # [S]
+	sbar[0]   & (1 << 2),  # [A]
+	sbar[1]   & (1 << 4),  # M
+	sbar[1]   & (1 << 1),  # STO
+	sbar[2]   & (1 << 6),  # RCL
+	sbar[3]   & (1 << 6),  # STAT
+	sbar[4]   & (1 << 7),  # CMPLX
+	sbar[5]   & (1 << 6),  # MAT
+	sbar[5]   & (1 << 1),  # VCT
+	sbar[7]   & (1 << 5),  # [D]
+	sbar[7]   & (1 << 1),  # [R]
+	sbar[8]   & (1 << 4),  # [G]
+	sbar[8]   & (1 << 0),  # FIX
+	sbar[9]   & (1 << 5),  # SCI
+	sbar[0xa] & (1 << 6),  # Math
+	sbar[0xa] & (1 << 3),  # v
+	sbar[0xb] & (1 << 7),  # ^
+	sbar[0xb] & (1 << 4),  # Disp
 	]
 
 	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(7, -1, -1)] for i in range(31)]
@@ -566,7 +571,10 @@ root.protocol('WM_DELETE_WINDOW', exit_sim)
 root['bg'] = config.console_bg
 
 keys_pressed = []
-root.bind('<KeyPress>', lambda x: keys_pressed.append(x.keysym.lower()) if x.keysym.lower() in config.keymap_kb.keys() else 'break')
+keys = []
+for key in [i[1:] for i in config.keymap.values()]: keys.extend(key)
+
+root.bind('<KeyPress>', lambda x: keys_pressed.append(x.keysym.lower()) if x.keysym.lower() in keys else 'break')
 root.bind('<KeyRelease>', lambda x: keys_pressed.remove(x.keysym.lower()) if x.keysym.lower() in keys_pressed else 'break')
 
 w_jump = tk.Toplevel(root)
@@ -747,12 +755,12 @@ def pygame_loop():
 	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
 
 	for i in range(len(screen_data_status_bar)):
-		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + config.status_bar_crops[i][0], 132), config.status_bar_crops[i])
+		crop = config.status_bar_crops[i]
+		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + crop[0], 132), crop)
 
 	for y in range(31):
 		for x in range(96):
 			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
-
 
 	if single_step: step = False
 	else: draw_text(f'{clock.get_fps():.1f} FPS', 22, config.width // 2, 44, config.pygame_color, anchor = 'midtop')

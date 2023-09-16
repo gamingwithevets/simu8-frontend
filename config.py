@@ -1,10 +1,13 @@
-# Configuration file for SimU8 frontend
+# Configuration file for u8_emu frontend
 
 # Path to the shared library.
 shared_lib = 'simu8.so'
 
 # Path to the ROM file.
 rom_file = 'rom.bin'
+
+# Toggle real/emulator ROM mode.
+real_hardware = True
 
 # Path to the status bar image.
 status_bar_path = 'images/interface_es_bar.png'
@@ -32,6 +35,10 @@ console_fg = '#cccccc'
 
 # Pygame text color.
 pygame_color = (0, 0, 0)
+
+# Top left corner of the screen.
+screen_tl_w = 58
+screen_tl_h = 132
 
 # Hex display window size.
 data_mem_width = 700

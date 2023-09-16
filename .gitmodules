@@ -1,3 +1,6 @@
 [submodule "SimU8"]
 	path = SimU8
 	url = https://github.com/gamingwithevets/SimU8.git
+[submodule "pyu8disas"]
+	path = pyu8disas
+	url = https://github.com/gamingwithevets/pyu8disas.git

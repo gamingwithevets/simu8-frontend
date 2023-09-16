@@ -1,8 +1,10 @@
 import os
 import sys
+import math
 import time
 import ctypes
 import pygame
+import struct
 import logging
 import functools
 import threading
@@ -11,9 +13,20 @@ import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.font
 import tkinter.messagebox
+from enum import IntEnum
 
-import config
+from pyu8disas import main as disas
+import platform
 
+if sys.version_info < (3, 6, 0, 'alpha', 4):
+	print(f'This program requires at least Python 3.6.0a4. (You are running Python {platform.python_version()})')
+	sys.exit()
+
+if pygame.version.vernum < (2, 2, 0):
+	print(f'This program requires at least Pygame 2.2.0. (You are running Pygame {pygame.version.ver})')
+	sys.exit()
+
+exec(f'import {sys.argv[1]+" as " if len(sys.argv) > 1 else ""}config')
 logging.basicConfig(datefmt = config.dt_format, format = '[%(asctime)s] %(levelname)s: %(message)s')
 
 class Data_t(ctypes.Union):
@@ -254,217 +267,482 @@ class Debounce():
 
 class DebounceTk(Debounce, tk.Tk): pass
 
-def validate_hex(max_chars, new_char, new_str, act_code, rang = None):
-	max_chars, act_code = int(max_chars), int(act_code)
-	if rang: rang = eval(rang)
+class Jump(tk.Toplevel):
+	def __init__(self, sim):
+		super(Jump, self).__init__()
+		self.sim = sim
 
-	if len(new_str) > max_chars: return False
+		self.withdraw()
+		self.geometry('250x100')
+		self.resizable(False, False)
+		self.title('Jump to address')
+		self.protocol('WM_DELETE_WINDOW', self.withdraw)
+		self.vh_reg = self.register(self.sim.validate_hex)
+		ttk.Label(self, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
+		self.csr = tk.Frame(self); self.csr.pack(fill = 'x')
+		ttk.Label(self.csr, text = 'CSR').pack(side = 'left')
+		self.csr_entry = ttk.Entry(self.csr, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0x10))); self.csr_entry.pack(side = 'right')
+		self.csr_entry.insert(0, '0')
+		self.pc = tk.Frame(self); self.pc.pack(fill = 'x')
+		ttk.Label(self.pc, text = 'PC').pack(side = 'left')
+		self.pc_entry = ttk.Entry(self.pc, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0, 0xfffe, 2))); self.pc_entry.pack(side = 'right')
+		ttk.Button(self, text = 'OK', command = self.set_csr_pc).pack(side = 'bottom')
+		self.bind('<Return>', lambda x: self.set_csr_pc())
+		self.bind('<Escape>', lambda x: self.withdraw())
 
-	if act_code == 1:
-		try: new_value_int = int(new_char, 16)
-		except ValueError: return False
-		if rang and len(new_str) == max_chars and int(new_str, 16) not in rang: return False
-		else: return True
-	else: return True
+	def set_csr_pc(self):
+		csr_entry = self.csr_entry.get()
+		pc_entry = self.pc_entry.get()
+		self.sim.sim.core.regs.csr = int(csr_entry, 16) if csr_entry else 0
+		self.sim.sim.core.regs.pc = int(pc_entry, 16) if pc_entry else 0
+		self.sim.print_regs()
+		self.withdraw()
 
-def get_var(var, typ): return typ.in_dll(simu8, var)
+		self.csr_entry.delete(0, 'end'); self.csr_entry.insert(0, '0')
+		self.pc_entry.delete(0, 'end')
 
-def read_dmem(addr, num_bytes, segment = 0):
-	odd = addr % 2 != 0
-	if odd:
-		addr -= 1
-		num_bytes += 1
+class Brkpoint(tk.Toplevel):
+	def __init__(self, sim):
+		super(Brkpoint, self).__init__()
+		self.sim = sim
 
-	data = b''
-	bytes_grabbed = 0
+		self.withdraw()
+		self.geometry('300x125')
+		self.resizable(False, False)
+		self.title('Set breakpoint')
+		self.protocol('WM_DELETE_WINDOW', self.withdraw)
+		self.vh_reg = self.register(self.sim.validate_hex)
+		ttk.Label(self, text = 'Single-step mode will be activated if CSR:PC matches\nthe below. Note that only 1 breakpoint can be set.\n(please input hex bytes)', justify = 'center').pack()
+		self.csr = tk.Frame(self); self.csr.pack(fill = 'x')
+		ttk.Label(self.csr, text = 'CSR').pack(side = 'left')
+		self.csr_entry = ttk.Entry(self.csr, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0x10))); self.csr_entry.pack(side = 'right')
+		self.csr_entry.insert(0, '0')
+		self.pc = tk.Frame(self); self.pc.pack(fill = 'x')
+		ttk.Label(self.pc, text = 'PC').pack(side = 'left')
+		self.pc_entry = ttk.Entry(self.pc, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0, 0xfffe, 2))); self.pc_entry.pack(side = 'right')
+		ttk.Button(self, text = 'OK', command = self.set_brkpoint).pack(side = 'bottom')
+		self.bind('<Return>', lambda x: self.set_brkpoint())
+		self.bind('<Escape>', lambda x: self.withdraw())
 
-	while bytes_grabbed < num_bytes:
-		remaining = num_bytes - bytes_grabbed
-		if remaining >= 8: grab = 8
-		elif remaining >= 4: grab = 4
-		elif remaining >= 2: grab = 2
-		else: grab = 1
+	def set_brkpoint(self):
+		csr_entry = self.csr_entry.get()
+		pc_entry = self.pc_entry.get()
+		self.sim.breakpoint = ((int(csr_entry, 16) if csr_entry else 0) << 16) + (int(pc_entry, 16) if pc_entry else 0)
+		self.sim.print_regs()
+		self.withdraw()
 
-		dt = simu8.memoryGetData_raw(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
-		if grab == 8: dt_ = dt.qword
-		elif grab == 4: dt_ = dt.dword
-		elif grab == 2: dt_ = dt.word
-		else: dt_ = dt.byte
-		data += dt_.to_bytes(grab, 'little')
-		bytes_grabbed += grab
+		self.csr_entry.delete(0, 'end'); self.csr_entry.insert(0, '0')
+		self.pc_entry.delete(0, 'end')
 
-	if odd: return data[1:]
-	else: return data
+	def clear_brkpoint(self):
+		self.sim.breakpoint = None
+		self.sim.print_regs()
 
-def write_dmem(addr, byte, segment = 0):
-	data = Data_t(); data.raw = byte
-	simu8.memorySetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr), ctypes.c_size_t(1), data)
+class Write(tk.Toplevel):
+	def __init__(self, sim):
+		super(Write, self).__init__()
+		self.sim = sim
+		
+		tk_font = tk.font.nametofont('TkDefaultFont')
+		bold_italic_font = tk_font.copy()
+		bold_italic_font.config(weight = 'bold', slant = 'italic')
 
-def read_cmem(addr, segment = 0):
-	try:
-		simu8.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
-		return get_var('CodeWord', ctypes.c_uint16).value
-	except OSError: return 0
+		self.withdraw()
+		self.geometry('375x125')
+		self.resizable(False, False)
+		self.title('Write to data memory')
+		self.protocol('WM_DELETE_WINDOW', self.withdraw)
+		self.vh_reg = self.register(self.sim.validate_hex)
+		ttk.Label(self, text = '(please input hex bytes)', justify = 'center').pack()
+		self.csr = tk.Frame(self); self.csr.pack(fill = 'x')
+		ttk.Label(self.csr, text = 'Segment').pack(side = 'left')
+		self.csr_entry = ttk.Entry(self.csr, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0x100))); self.csr_entry.pack(side = 'right')
+		self.csr_entry.insert(0, '0')
+		self.pc = tk.Frame(self); self.pc.pack(fill = 'x')
+		ttk.Label(self.pc, text = 'Address').pack(side = 'left')
+		self.pc_entry = ttk.Entry(self.pc, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', range(0x10000))); self.pc_entry.pack(side = 'right')
+		self.byte = tk.Frame(self); self.byte.pack(fill = 'x')
+		ttk.Label(self.byte, text = 'Hex data').pack(side = 'left')
+		self.byte_entry = ttk.Entry(self.byte, validate = 'key', validatecommand = (self.vh_reg, '%S', '%P', '%d', None, 1)); self.byte_entry.pack(side = 'right')
+		ttk.Button(self, text = 'OK', command = self.write).pack(side = 'bottom')
+		self.bind('<Return>', lambda x: self.write())
+		self.bind('<Escape>', lambda x: self.withdraw())
 
-def calc_checksum():
-	csum = 0
-	csum1 = int.from_bytes(read_dmem(0xfffc, 2, 1), 'little')
-	for i in range(0x10000): csum -= int.from_bytes(read_dmem(i, 1, 8), 'big')
-	for i in range(0xfffc): csum -= int.from_bytes(read_dmem(i, 1, 1), 'big')
-	csum %= 0x10000
-	tk.messagebox.showinfo('Checksum', f'Expected checksum: {csum1:04X}\nCalculated checksum: {csum:04X}\n\n{"This looks like a good dump!" if csum == csum1 else "This is either a bad dump or an emulator ROM."}')
+	def write(self):
+		seg = self.csr_entry.get(); seg = int(seg, 16) if seg else 0
+		adr = self.pc_entry.get(); adr = int(adr, 16) if adr else 0
+		byte = self.byte_entry.get()
+		try: byte = bytes.fromhex(byte) if byte else '\x00'
+		except Exception: 
+			tk.messagebox.showerror('Error', 'Invalid hex string!')
+			return
+		
+		index = 0
+		while index < len(byte):
+			remaining = len(byte) - index
+			if remaining > 8: num = 8
+			else: num = remaining
+			self.sim.write_dmem(adr + index, num, int.from_bytes(byte[index:index+num], 'little'), seg)
+			index += num
 
-def set_csr_pc():
-	csr_entry = jump_csr_entry.get()
-	pc_entry = jump_pc_entry.get()
-	get_var('CSR', ctypes.c_uint8).value = int(csr_entry, 16) if csr_entry else 0
-	get_var('PC', ctypes.c_uint16).value = int(pc_entry, 16) if pc_entry else 0
-	print_regs()
-	w_jump.withdraw()
+		self.sim.print_regs()
+		self.sim.data_mem.get_mem()
+		self.withdraw()
 
-	jump_csr_entry.delete(0, 'end'); jump_csr_entry.insert(0, '0')
-	jump_pc_entry.delete(0, 'end')
+		self.csr_entry.delete(0, 'end'); self.csr_entry.insert(0, '0')
+		self.pc_entry.delete(0, 'end')
+		self.byte_entry.delete(0, 'end'); self.byte_entry.insert(0, '0')
 
-data_cache = {}
+class DataMem(tk.Toplevel):
+	def __init__(self, sim):
+		super(DataMem, self).__init__()
+		self.sim = sim
 
-def open_mem():
-	get_mem()
-	w_data_mem.deiconify()
+		self.withdraw()
+		self.geometry(f'{config.data_mem_width}x{config.data_mem_height}')
+		self.resizable(False, False)
+		self.title('Show data memory')
+		self.protocol('WM_DELETE_WINDOW', self.withdraw)
 
-def sb_yview(*args):
-	code_text.yview(*args)
-	get_mem()
+		self.segment_var = tk.StringVar(); self.segment_var.set('RAM (00:8000H - 00:8DFFH)')
+		self.segment_cb = ttk.Combobox(self, width = 30, textvariable = self.segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
+		self.segment_cb.bind('<<ComboboxSelected>>', lambda x: self.get_mem(False))
+		self.segment_cb.pack()
 
-def get_mem(keep_yview = True):
-	global data_cache
+		self.code_frame = ttk.Frame(self)
+		self.code_text_sb = ttk.Scrollbar(self.code_frame)
+		self.code_text_sb.pack(side = 'right', fill = 'y')
+		self.code_text = tk.Text(self.code_frame, font = config.data_mem_font, yscrollcommand = self.code_text_sb.set, wrap = 'none', state = 'disabled')
+		self.code_text_sb.config(command = self.sb_yview)
+		self.code_text.pack(fill = 'both', expand = True)
+		self.code_frame.pack(fill = 'both', expand = True)
 
-	rang = (0x8000, 0xe00) if segment_var.get().split()[0] == 'RAM' else (0xf000, 0x1000)
+	def sb_yview(self, *args):
+		self.code_text.yview(*args)
+		self.get_mem()
 
-	code_text['state'] = 'normal'
-	yview_bak = code_text.yview()[0]
-	code_text.delete('1.0', 'end')
-	code_text.insert('end', format_mem(read_dmem(*rang), rang[0]))
-	if keep_yview: code_text.yview_moveto(str(yview_bak))
-	code_text['state'] = 'disabled'
+	def open(self):
+		self.get_mem()
+		self.deiconify()
 
-@functools.lru_cache
-def format_mem(data, addr):
-	lines = {}
-	j = addr // 16
-	for i in range(addr, addr + len(data), 16):
-		line = ''
-		line_ascii = ''
-		for byte in data[i-addr:i-addr+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
-		lines[j] = f'00:{i % 0x10000:04X}  {line}  {line_ascii}'
-		j += 1
-	return '\n'.join(lines.values())
+	def get_mem(self, keep_yview = True):
+		rang = (0x8000, 0xe00) if self.segment_var.get().split()[0] == 'RAM' else (0xf000, 0x1000)
 
-def set_brkpoint():
-	global brkpoint
+		self.code_text['state'] = 'normal'
+		yview_bak = self.code_text.yview()[0]
+		self.code_text.delete('1.0', 'end')
+		self.code_text.insert('end', self.format_mem(self.sim.read_dmem(*rang), rang[0]))
+		if keep_yview: self.code_text.yview_moveto(str(yview_bak))
+		self.code_text['state'] = 'disabled'
 
-	csr_entry = brkpoint_csr_entry.get()
-	pc_entry = brkpoint_pc_entry.get()
-	brkpoint = ((int(csr_entry, 16) if csr_entry else 0) << 16) + (int(pc_entry, 16) if pc_entry else 0)
-	print_regs()
-	w_brkpoint.withdraw()
+	@staticmethod
+	@functools.lru_cache
+	def format_mem(data, addr):
+		lines = {}
+		j = addr // 16
+		for i in range(addr, addr + len(data), 16):
+			line = ''
+			line_ascii = ''
+			for byte in data[i-addr:i-addr+16]: line += f'{byte:02X} '; line_ascii += chr(byte) if byte in range(0x20, 0x7f) else '.'
+			lines[j] = f'00:{i % 0x10000:04X}  {line}  {line_ascii}'
+			j += 1
+		return '\n'.join(lines.values())
 
-	brkpoint_csr_entry.delete(0, 'end'); brkpoint_csr_entry.insert(0, '0')
-	brkpoint_pc_entry.delete(0, 'end')
+class Sim:
+	def __init__(self):
+		self.root = DebounceTk()
+		self.root.geometry(f'{config.width*2}x{config.height}')
+		self.root.resizable(False, False)
+		self.root.title(config.root_w_name)
+		self.root.focus_set()
+		self.root['bg'] = config.console_bg
 
-def clear_brkpoint():
-	global brkpoint
-	brkpoint = None
-	print_regs()
+		self.sim = ctypes.CDLL(os.path.abspath(config.shared_lib))
+		self.sim.memoryGetData.restype = ctypes.c_uint64
+		self.sim.memoryInit(ctypes.c_char_p(config.rom_file.encode()), None)
 
-def write():
-	seg = write_csr_entry.get(); seg = int(seg, 16) if seg else 0
-	adr = write_pc_entry.get(); adr = int(adr, 16) if adr else 0
-	byte = write_byte_entry.get(); byte = int(byte, 16) if byte else 0
-	write_dmem(adr, byte, seg)
-	print_regs()
-	get_mem()
-	w_write.withdraw()
+		self.keys_pressed = set()
+		self.keys = []
+		for key in [i[1:] for i in config.keymap.values()]: self.keys.extend(key)
 
-	write_csr_entry.delete(0, 'end'); write_csr_entry.insert(0, '0')
-	write_pc_entry.delete(0, 'end')
-	write_byte_entry.delete(0, 'end'); write_byte_entry.insert(0, '0')
+		self.jump = Jump(self)
+		self.brkpoint = Brkpoint(self)
+		self.write = Write(self)
+		self.data_mem = DataMem(self)
 
-def set_step():
-	global step
-	step = True
+		embed_pygame = tk.Frame(self.root, width = config.width, height = config.height)
+		embed_pygame.pack(side = 'left')
+		embed_pygame.focus_set()
 
-def set_single_step(val):
-	global single_step
+		def press_cb(event):
+			for k, v in config.keymap.items():
+				p = v[0]
+				if (event.type == tk.EventType.ButtonPress and event.x in range(p[0], p[0]+p[2]) and event.y in range(p[1], p[1]+p[3])) \
+				or (event.type == tk.EventType.KeyPress and event.keysym.lower() in v[1:]):
+					if k is None: self.reset_core(False)
+					elif config.real_hardware: self.keys_pressed.add(k)
+					else:
+						self.write_dmem(0x8e01, 1, 1 << k[0])
+						self.write_dmem(0x8e02, 1, 1 << k[1])
 
-	if single_step == val: return
+		def release_cb(event):
+			if config.real_hardware: 
+				for k, v in config.keymap.items():
+					if event.type == tk.EventType.KeyRelease and event.keysym.lower() in v[1:] and k is not None and k in self.keys_pressed: self.keys_pressed.remove(k)
+					elif event.type == tk.EventType.ButtonRelease: self.keys_pressed.clear()
+			else:
+				self.write_dmem(0x8e01, 1, 0)
+				self.write_dmem(0x8e02, 1, 0)
 
-	single_step = val
-	if val:
-		print_regs()
-		get_mem()
-	else: threading.Thread(target = core_step_loop, daemon = True).start()
+		embed_pygame.bind('<KeyPress>', press_cb)
+		embed_pygame.bind('<KeyRelease>', release_cb)
+		embed_pygame.bind('<ButtonPress-1>', press_cb)
+		embed_pygame.bind('<ButtonRelease-1>', release_cb)
 
-def open_popup(x):
-	try: rc_menu.tk_popup(x.x_root, x.y_root)
-	finally: rc_menu.grab_release()
+		if os.name != 'nt': self.root.update()
 
-def core_step():
-	global ok, prev_csr_pc
+		self.info_label = tk.Label(self.root, text = 'Loading...', width = config.width, height = config.height, font = config.console_font, fg = config.console_fg, bg = config.console_bg, justify = 'left', anchor = 'nw')
+		self.info_label.pack(side = 'left')
 
-	prev_csr_pc = f"{get_var('CSR', ctypes.c_uint8).value:X}:{get_var('PC', ctypes.c_uint16).value:04X}H"
+		os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())
+		os.environ['SDL_VIDEODRIVER'] = 'windib' if os.name == 'nt' else 'x11'
+		pygame.init()
+		self.screen = pygame.display.set_mode()
 
-	ok = False
-	try: ret_val = simu8.coreStep()
-	except OSError as e: logging.error(e)
+		self.interface = pygame.image.load(config.interface_path)
+		self.interface_rect = self.interface.get_rect()
+		self.status_bar = pygame.image.load(config.status_bar_path)
+		self.status_bar_rect = self.status_bar.get_rect()
 
-	ki = 0xff
-	ko = read_dmem(0xf046, 1)[0]
-	try:
-		press = pygame.mouse.get_pressed()[0]
-		video_inited = True
-	except pygame.error:
-		press = False
-		video_inited = False
+		self.show_regs = tk.BooleanVar(value = True)
+		self.disp_lcd = tk.BooleanVar(value = True)
 
-	pos = pygame.mouse.get_pos() if video_inited else (0, 0)
+		self.rc_menu = tk.Menu(self.root, tearoff = 0)
+		self.rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: self.set_single_step(True))
+		self.rc_menu.add_command(label = 'Resume execution (unpause)', accelerator = 'P', command = lambda: self.set_single_step(False))
+		self.rc_menu.add_separator()
+		self.rc_menu.add_command(label = 'Jump to...', accelerator = 'J', command = self.jump.deiconify)
+		self.rc_menu.add_separator()
+		self.rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command = self.brkpoint.deiconify)
+		self.rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = self.brkpoint.clear_brkpoint)
+		self.rc_menu.add_separator()
+		self.rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = self.data_mem.open)
+		self.rc_menu.add_separator()
+		self.rc_menu.add_checkbutton(label = 'Show registers outside of single-step', accelerator = 'R', variable = self.show_regs)
+		self.rc_menu.add_checkbutton(label = 'Toggle LCD/buffer display (on: LCD, off: buffer)', accelerator = 'D', variable = self.disp_lcd)
+		self.rc_menu.add_separator()
+		self.rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = self.reset_core)
+		self.rc_menu.add_separator()
 
-	key_pressed = False
-	for k, v in config.keymap.items():
-		p = v[0]
-		if (press and pos[0] in range(p[0], p[0]+p[2]) and pos[1] in range(p[1], p[1]+p[3])) or (v[1] in keys_pressed or v[2] in keys_pressed):
-			if k is None: reset_core(False)
-			elif ko & (1 << k[1]): ki &= ~(1 << k[0])
-	
-	write_dmem(0xf040, ki)
+		extra_funcs = tk.Menu(self.rc_menu, tearoff = 0)
+		extra_funcs.add_command(label = 'Calculate checksum', command = self.calc_checksum)
+		extra_funcs.add_command(label = 'Write to data memory', command = self.write.deiconify)
+		self.rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
+		self.rc_menu.add_separator()
+		self.rc_menu.add_command(label = 'Quit', accelerator = 'Q', command = self.exit_sim)
 
-	ok = True
-	csr = get_var('CSR', ctypes.c_uint8).value
-	pc = get_var('PC', ctypes.c_uint16).value
-	if (csr << 16) + pc == brkpoint:
-		tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:X}:{pc:04X}H has been hit!')
-		set_single_step(True)
-	if ret_val == 3:
-		dnl = '\n\n'
-		logging.error(f'Illegal instruction found @ CSR:PC = {csr:X}:{pc:04X}H')
-		tk.messagebox.showerror('!!! Illegal Instruction !!!', F'Illegal instruction found!\nCSR:PC = {csr:X}:{pc:04X}H{dnl+"Single-step mode has been activated." if not single_step else ""}')
-		set_single_step(True)
-	if ret_val == 1: logging.warning(f'A write to a read-only region has happened @ CSR:PC = {csr:X}:{pc:04X}H')
-	if ret_val == 2: logging.warning(f'An unimplemented instruction has been skipped @ address {csr:X}{(pc - 2) & 0xffff:04X}H')
+		self.root.bind('<Button-3>', self.open_popup)
+		self.bind_('s', lambda x: self.set_single_step(True))
+		self.bind_('p', lambda x: self.set_single_step(False))
+		self.bind_('j', lambda x: self.jump.deiconify())
+		self.bind_('b', lambda x: self.brkpoint.deiconify())
+		self.bind_('n', lambda x: self.brkpoint.clear_brkpoint())
+		self.bind_('m', lambda x: self.data_mem.open())
+		self.bind_('r', lambda x: self.show_regs.set(not self.show_regs.get()))
+		self.bind_('d', lambda x: self.disp_lcd.set(not self.disp_lcd.get()))
+		self.bind_('c', lambda x: self.reset_core())
+		self.bind_('q', lambda x: self.exit_sim())
 
-def core_step_loop():
-	while not single_step: core_step()
+		self.single_step = True
+		self.ok = True
+		self.step = False
+		self.breakpoint = None
+		self.clock = pygame.time.Clock()
 
-def print_regs():
-	global prev_csr_pc
+		self.prev_csr_pc = None
+		self.last_ready = 0
+		self.stop_accept = [False, False]
+		self.stop_mode = False
 
-	gr = get_var('GR', GR_t)
-	csr = get_var('CSR', ctypes.c_uint8).value
-	pc = get_var('PC', ctypes.c_uint16).value
-	sp = get_var('SP', ctypes.c_uint16).value
-	psw_var = get_var('PSW', PSW_t)
-	psw = psw_var.field
-	psw_val = psw_var.raw
-	info_label['text'] = f'''\
+		self.ips = 0
+		self.ips_start = time.time()
+		self.ips_ctr = 0
+
+	def run(self):
+		self.reset_core()
+		self.pygame_loop()
+
+		self.root.bind('\\', lambda x: self.set_step())
+
+		if os.name != 'nt': os.system('xset r off')
+		self.root.mainloop()
+
+	def bind_(self, char, func):
+		self.root.bind(char.lower(), func)
+		self.root.bind(char.upper(), func)
+
+	@staticmethod
+	def validate_hex(new_char, new_str, act_code, rang = None, spaces = False):
+		act_code = int(act_code)
+		if rang: rang = eval(rang)
+		
+		if act_code == 1:
+			try: new_value_int = int(new_char, 16)
+			except ValueError:
+				if new_char != ' ': return False
+				elif not spaces: return False
+			if rang and len(new_str) >= len(hex(rang[-1])[2:]) and int(new_str, 16) not in rang: return False
+
+		return True
+
+	def read_dmem(self, addr, num_bytes, segment = 0):
+		odd = addr % 2 != 0
+		if odd:
+			addr -= 1
+			num_bytes += 1
+
+		data = b''
+		bytes_grabbed = 0
+
+		while bytes_grabbed < num_bytes:
+			remaining = num_bytes - bytes_grabbed
+			if remaining >= 8: grab = 8
+			elif remaining >= 4: grab = 4
+			elif remaining >= 2: grab = 2
+			else: grab = 1
+
+			dt = self.sim.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr + bytes_grabbed), ctypes.c_size_t(grab))
+			data += dt.to_bytes(grab, 'little')
+			bytes_grabbed += grab
+
+		if odd: return data[1:]
+		else: return data
+
+	def write_dmem(self, addr, num_bytes, data, segment = 0):
+		self.sim.memorySetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr), ctypes.c_size_t(num_bytes), ctypes.c_uint64(data))
+
+	def read_cmem(self, addr, segment = 0): return self.sim.memoryGetCodeWord(ctypes.c_uint8(segment), ctypes.c_uint16(addr))
+
+	def calc_checksum(self):
+		csum = 0
+		csum1 = int.from_bytes(self.read_dmem(0xfffc, 2, 1), 'little')
+		for i in range(0x10000): csum -= int.from_bytes(self.read_dmem(i, 1, 8), 'big')
+		for i in range(0xfffc): csum -= int.from_bytes(self.read_dmem(i, 1, 1), 'big')
+		csum %= 0x10000
+		tk.messagebox.showinfo('Checksum', f'Expected checksum: {csum1:04X}\nCalculated checksum: {csum:04X}\n\n{"This looks like a good dump!" if csum == csum1 else "This is either a bad dump or an emulator ROM."}')
+
+	def set_step(self): self.step = True
+
+	def set_single_step(self, val):
+		if self.single_step == val: return
+
+		self.single_step = val
+		if val:
+			self.print_regs()
+			self.data_mem.get_mem()
+		else: threading.Thread(target = self.core_step_loop, daemon = True).start()
+
+	def open_popup(self, x):
+		try: self.rc_menu.tk_popup(x.x_root, x.y_root)
+		finally: self.rc_menu.grab_release()
+
+	def keyboard(self):
+		if config.real_hardware:
+			ki = 0xff
+			ko = self.read_dmem(0xf046, 1)[0]
+
+			for ki_val, ko_val in self.keys_pressed:
+				if ko & (1 << ko_val): ki &= ~(1 << ki_val)
+
+			self.write_dmem(0xf040, 1, ki)
+			if len(self.keys_pressed) > 0: self.write_dmem(0xf014, 1, 2)
+		else:
+			ready = self.read_dmem(0x8e00, 1)[0]
+
+			if not self.last_ready and ready:
+				self.write_dmem(0x8e01, 1, 0)
+				self.write_dmem(0x8e02, 1, 0)
+			
+			self.last_ready = ready
+
+	def sbycon(self):
+		sbycon = self.read_dmem(0xf009, 1)[0]
+
+		if sbycon == 2 and all(self.stop_accept):
+			self.stop_mode = True
+			self.write_dmem(0xf009, 1, 0)
+			self.write_dmem(0xf008, 0, 0)
+			self.stop_accept = [False, False]
+
+	def timer(self):
+		counter = struct.unpack("<H", self.read_dmem(0xf022, 2))[0]
+		target = struct.unpack("<H", self.read_dmem(0xf020, 2))[0]
+
+		counter += 1
+		counter &= 0xffff
+
+		self.write_dmem(0xf022, 1, counter & 0xff)
+		self.write_dmem(0xf023, 1, counter >> 8)
+
+		if counter >= target and self.stop_mode:
+			self.stop_mode = False
+			if config.real_hardware: self.write_dmem(0xf014, 1, 0x20)
+
+	def get_var(self, var, typ): return typ.in_dll(self.sim, var)
+
+	def core_step(self):
+		self.prev_csr_pc = f"{self.get_var('CSR', ctypes.c_uint8).value:X}:{self.get_var('PC', ctypes.c_uint16).value:04X}H"
+
+		self.keyboard()
+		self.sbycon()
+		self.timer()
+
+		if not self.stop_mode:
+			self.ok = False
+			retval = None
+			try: retval = self.sim.coreStep()
+			except Exception as e: logging.error(str(e))
+
+			csr = self.get_var('CSR', ctypes.c_uint8).value
+			pc = self.get_var('PC', ctypes.c_uint16).value
+
+			if retval == 2: logging.warning(f'unimplemented instruction @ {csr:X}:{(pc - 2) & 0xffff:04X}H')
+			elif retval == 3: logging.error(f'illegal instruction @ {csr:X}:{pc:04X}H')
+
+			stpacp = self.read_dmem(0xf008, 1)[0]
+			if self.stop_accept[0]:
+				if stpacp & 0xa0 == 0xa0 and not self.stop_accept[1]: self.stop_accept[1] = True
+			elif stpacp & 0x50 == 0x50: self.stop_accept[0] = True
+
+			self.ok = True
+
+			if self.ips_ctr % 1000 == 0:
+				cur = time.time()
+				try: self.ips = 1000 / (cur - self.ips_start)
+				except ZeroDivisionError: self.ips = None
+				self.ips_start = cur
+
+			self.ips_ctr += 1
+
+		csr = self.get_var('CSR', ctypes.c_uint8).value
+		pc = self.get_var('PC', ctypes.c_uint16).value
+		if (csr << 16) + pc == self.breakpoint:
+			tk.messagebox.showinfo('Breakpoint hit!', f'Breakpoint {csr:X}:{pc:04X}H has been hit!')
+			self.set_single_step(True)
+
+	def core_step_loop(self):
+		while not self.single_step: self.core_step()
+
+	def print_regs(self):
+		gr = self.get_var('GR', GR_t)
+		csr = self.get_var('CSR', ctypes.c_uint8).value
+		pc = self.get_var('PC', ctypes.c_uint16).value
+		sp = self.get_var('SP', ctypes.c_uint16).value
+		psw = self.get_var('PSW', PSW_t)
+		psw_val = psw.raw
+		psw_field = psw.field
+
+		self.info_label['text'] = f'''\
 === REGISTERS ===
 
 General registers:
@@ -475,304 +753,131 @@ R8   R9   R10  R11  R12  R13  R14  R15
 ''' + '   '.join(f'{(gr.qrs[1] >> (i*8)) & 0xff:02X}' for i in range(8)) + f'''
 
 Control registers:
-CSR:PC          {csr:X}:{pc:04X}H (prev. value: {prev_csr_pc})
-Words @ CSR:PC  {read_cmem(pc, csr):04X} {read_cmem(pc + 2, csr):04X} {read_cmem(pc + 4, csr):04X}
+CSR:PC          {csr:X}:{pc:04X}H (prev. value: {self.prev_csr_pc})
+Words @ CSR:PC  ''' + ' '.join(format(self.read_cmem((pc + i*2) & 0xfffe, csr), '04X') for i in range(3)) + f'''
+Instruction     {self.decode_instruction()}
 SP              {sp:04X}H
-Words @ SP      ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
-                ''' + ' '.join(format(int.from_bytes(read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
-DSR:EA          {get_var('DSR', ctypes.c_uint8).value:02X}:{get_var('EA', ctypes.c_uint16).value:04X}H
+Words @ SP      ''' + ' '.join(format(int.from_bytes(self.read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
+                ''' + ' '.join(format(int.from_bytes(self.read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
+DSR:EA          {self.get_var('DSR', ctypes.c_uint8).value:02X}:{self.get_var('EA', ctypes.c_uint16).value:04X}H
 
                    C Z S OV MIE HC ELEVEL
-PSW             {psw_val:02X} {psw.C} {psw.Z} {psw.S}  {psw.OV}  {psw.MIE}   {psw.HC} {psw.ELevel:02b} ({psw.ELevel})
+PSW             {psw_val:02X} {psw_field.C} {psw_field.Z} {psw_field.S}  {psw_field.OV}  {psw_field.MIE}   {psw_field.HC} {psw_field.ELevel:02b} ({psw_field.ELevel})
 
-LCSR:LR         {get_var('LCSR', ctypes.c_uint8).value:X}:{get_var('LR', ctypes.c_uint16).value:04X}H
-ECSR1:ELR1      {get_var('ECSR1', ctypes.c_uint8).value:X}:{get_var('ELR1', ctypes.c_uint16).value:04X}H
-ECSR2:ELR2      {get_var('ECSR2', ctypes.c_uint8).value:X}:{get_var('ELR2', ctypes.c_uint16).value:04X}H
-ECSR3:ELR3      {get_var('ECSR3', ctypes.c_uint8).value:X}:{get_var('ELR3', ctypes.c_uint16).value:04X}H
+LCSR:LR         {self.get_var('LCSR', ctypes.c_uint8).value:X}:{self.get_var('LR', ctypes.c_uint16).value:04X}H
+ECSR1:ELR1      {self.get_var('ECSR1', ctypes.c_uint8).value:X}:{self.get_var('ELR1', ctypes.c_uint16).value:04X}H
+ECSR2:ELR2      {self.get_var('ECSR2', ctypes.c_uint8).value:X}:{self.get_var('ELR2', ctypes.c_uint16).value:04X}H
+ECSR3:ELR3      {self.get_var('ECSR3', ctypes.c_uint8).value:X}:{self.get_var('ELR3', ctypes.c_uint16).value:04X}H
 
-EPSW1           {get_var('EPSW1', PSW_t).raw:02X}
-EPSW2           {get_var('EPSW2', PSW_t).raw:02X}
-EPSW3           {get_var('EPSW3', PSW_t).raw:02X}
+EPSW1           {self.get_var('EPSW1', PSW_t).raw:02X}
+EPSW2           {self.get_var('EPSW2', PSW_t).raw:02X}
+EPSW3           {self.get_var('EPSW3', PSW_t).raw:02X}
 
-{'Breakpoint set to ' + format(brkpoint >> 16, 'X') + ':' + format(brkpoint % 0x10000, '04X') + 'H' if brkpoint is not None else 'No breakpoint set.'}
-''' if single_step or (not single_step and show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
+Other information:
+Breakpoint               {format(self.breakpoint >> 16, 'X') + ':' + format(self.breakpoint % 0x10000, '04X') + 'H' if self.breakpoint is not None else 'None'}
+STOP mode acceptor       Level 1 [{'x' if self.stop_accept[0] else ' '}]
+                         Level 2 [{'x' if self.stop_accept[1] else ' '}]
+STOP mode                [{'x' if self.stop_mode else ' '}]
+Instructions per second  {format(self.ips, '.1f') if self.ips is not None and not self.single_step else 'None'}\
+''' if self.single_step or (not self.single_step and self.show_regs.get()) else '=== REGISTER DISPLAY DISABLED ===\nTo enable, do one of these things:\n- Enable single-step.\n- Press R or right-click >\n  Show registers outside of single-step.'
 
-def draw_text(text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
-	font = pygame.font.SysFont(font_name, int(size))
-	text_surface = font.render(str(text), True, color)
-	text_rect = text_surface.get_rect()
-	exec('text_rect.' + anchor + ' = (x,y)')
-	screen.blit(text_surface, text_rect)
+	def decode_instruction(self):
+		disas.input_file = b''
+		for i in range(3): disas.input_file += self.read_cmem((self.get_var('PC', ctypes.c_uint16).value + i*2) & 0xfffe, self.get_var('CSR', ctypes.c_uint16).value).to_bytes(2, 'little')
+		disas.addr = 0
+		ins_str, _, dsr_prefix, _ = disas.decode_ins()
+		if dsr_prefix: ins_str, _, _, _ = disas.decode_ins()
+		return ins_str
 
-@functools.lru_cache
-def get_scr_data(*scr_bytes):
-	sbar = scr_bytes[0]
-	screen_data_status_bar = [
-	sbar[0]   & (1 << 4),  # [S]
-	sbar[0]   & (1 << 2),  # [A]
-	sbar[1]   & (1 << 4),  # M
-	sbar[1]   & (1 << 1),  # STO
-	sbar[2]   & (1 << 6),  # RCL
-	sbar[3]   & (1 << 6),  # STAT
-	sbar[4]   & (1 << 7),  # CMPLX
-	sbar[5]   & (1 << 6),  # MAT
-	sbar[5]   & (1 << 1),  # VCT
-	sbar[7]   & (1 << 5),  # [D]
-	sbar[7]   & (1 << 1),  # [R]
-	sbar[8]   & (1 << 4),  # [G]
-	sbar[8]   & (1 << 0),  # FIX
-	sbar[9]   & (1 << 5),  # SCI
-	sbar[0xa] & (1 << 6),  # Math
-	sbar[0xa] & (1 << 3),  # v
-	sbar[0xb] & (1 << 7),  # ^
-	sbar[0xb] & (1 << 4),  # Disp
-	]
+	def draw_text(self, text, size, x, y, color = (255, 255, 255), font_name = None, anchor = 'center'):
+		font = pygame.font.SysFont(font_name, int(size))
+		text_surface = font.render(str(text), True, color)
+		text_rect = text_surface.get_rect()
+		exec('text_rect.' + anchor + ' = (x,y)')
+		self.screen.blit(text_surface, text_rect)
 
-	screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(7, -1, -1)] for i in range(31)]
+	@staticmethod
+	@functools.lru_cache
+	def get_scr_data(*scr_bytes):
+		sbar = scr_bytes[0]
+		screen_data_status_bar = [
+		sbar[0]   & (1 << 4),  # [S]
+		sbar[0]   & (1 << 2),  # [A]
+		sbar[1]   & (1 << 4),  # M
+		sbar[1]   & (1 << 1),  # STO
+		sbar[2]   & (1 << 6),  # RCL
+		sbar[3]   & (1 << 6),  # STAT
+		sbar[4]   & (1 << 7),  # CMPLX
+		sbar[5]   & (1 << 6),  # MAT
+		sbar[5]   & (1 << 1),  # VCT
+		sbar[7]   & (1 << 5),  # [D]
+		sbar[7]   & (1 << 1),  # [R]
+		sbar[8]   & (1 << 4),  # [G]
+		sbar[8]   & (1 << 0),  # FIX
+		sbar[9]   & (1 << 5),  # SCI
+		sbar[0xa] & (1 << 6),  # Math
+		sbar[0xa] & (1 << 3),  # v
+		sbar[0xb] & (1 << 7),  # ^
+		sbar[0xb] & (1 << 4),  # Disp
+		]
 
-	return screen_data_status_bar, screen_data
+		screen_data = [[scr_bytes[1+i][j] & (1 << k) for j in range(0xc) for k in range(7, -1, -1)] for i in range(31)]
 
-def reset_core(single_step = True):
-	global prev_csr_pc
+		return screen_data_status_bar, screen_data
 
-	simu8.coreZero()
-	simu8.coreReset()
-	prev_csr_pc = None
-	set_single_step(single_step)
-	print_regs()
-	get_mem()
+	def reset_core(self, single_step = True):
+		self.sim.coreReset()
+		self.prev_csr_pc = None
+		self.set_single_step(single_step)
+		self.print_regs()
+		self.data_mem.get_mem()
 
-def exit_sim():
-	simu8.coreReset()
-	simu8.memoryFree()
-	pygame.display.quit()
-	pygame.quit()
-	root.quit()
-	if os.name != 'nt': os.system('xset r on')
-	sys.exit()
+	def exit_sim(self):
+		self.sim.memoryFree()
+		pygame.quit()
+		self.root.quit()
+		if os.name != 'nt': os.system('xset r on')
+		sys.exit()
 
-import platform
-if sys.version_info < (3, 6, 0, 'alpha', 4):
-	print(f'This program requires at least Python 3.6.0a4. (You are running Python {platform.python_version()})')
-	sys.exit()
+	def pygame_loop(self):
+		self.screen.fill((0, 0, 0))
 
-if pygame.version.vernum < (2, 2, 0):
-	print(f'This program requires at least Pygame 2.2.0. (You are running Pygame {pygame.version.ver})')
-	sys.exit()
+		if self.single_step and self.step: self.core_step()
+		if (self.single_step and self.step) or not self.single_step:
+			self.print_regs()
+			if self.data_mem.winfo_viewable(): self.data_mem.get_mem()
 
-simu8 = ctypes.CDLL(os.path.abspath(config.shared_lib))
-simu8.memoryGetData_raw.restype = Data_t
+		self.clock.tick()
 
-root = DebounceTk()
-root.geometry(f'{config.width*2}x{config.height}')
-root.resizable(False, False)
-root.title(config.root_w_name)
-root.protocol('WM_DELETE_WINDOW', exit_sim)
-root['bg'] = config.console_bg
+		self.screen.fill((0, 0, 0))
+		self.screen.blit(self.interface, self.interface_rect)
 
-keys_pressed = []
-keys = []
-for key in [i[1:] for i in config.keymap.values()]: keys.extend(key)
+		disp_lcd = self.disp_lcd.get()
+		self.draw_text(f'Displaying {"LCD" if disp_lcd else "buffer"}', 22, config.width // 2, 22, config.pygame_color, anchor = 'midtop')
 
-root.bind('<KeyPress>', lambda x: keys_pressed.append(x.keysym.lower()) if x.keysym.lower() in keys else 'break')
-root.bind('<KeyRelease>', lambda x: keys_pressed.remove(x.keysym.lower()) if x.keysym.lower() in keys_pressed else 'break')
+		scr_bytes = [self.read_dmem(0xf800 + i*0x10 if disp_lcd else 0x87d0 + i*0xc, 0xc) for i in range(0x20)]
+		screen_data_status_bar, screen_data = self.get_scr_data(*scr_bytes)
+		
+		scr_range = self.read_dmem(0xf030, 1)[0] & 7
+		scr_mode = self.read_dmem(0xf031, 1)[0] & 7
 
-w_jump = tk.Toplevel(root)
-w_jump.withdraw()
-w_jump.geometry('250x100')
-w_jump.resizable(False, False)
-w_jump.title('Jump to address')
-w_jump.protocol('WM_DELETE_WINDOW', w_jump.withdraw)
-w_jump_vh_reg = w_jump.register(validate_hex)
-ttk.Label(w_jump, text = 'Input new values for CSR and PC.\n(please input hex bytes)', justify = 'center').pack()
-jump_csr = tk.Frame(w_jump); jump_csr.pack(fill = 'x')
-ttk.Label(jump_csr, text = 'CSR').pack(side = 'left')
-jump_csr_entry = ttk.Entry(jump_csr, validate = 'key', validatecommand = (w_jump_vh_reg, 1, '%S', '%P', '%d')); jump_csr_entry.pack(side = 'right')
-jump_csr_entry.insert(0, '0')
-jump_pc = tk.Frame(w_jump); jump_pc.pack(fill = 'x')
-ttk.Label(jump_pc, text = 'PC').pack(side = 'left')
-jump_pc_entry = ttk.Entry(jump_pc, validate = 'key', validatecommand = (w_jump_vh_reg, 4, '%S', '%P', '%d', range(0, 0xfffe, 2))); jump_pc_entry.pack(side = 'right')
-ttk.Button(w_jump, text = 'OK', command = set_csr_pc).pack(side = 'bottom')
-w_jump.bind('<Return>', lambda x: set_csr_pc())
-w_jump.bind('<Escape>', lambda x: w_jump.withdraw())
-
-w_brkpoint = tk.Toplevel(root)
-w_brkpoint.withdraw()
-w_brkpoint.geometry('300x125')
-w_brkpoint.resizable(False, False)
-w_brkpoint.title('Set breakpoint')
-w_brkpoint.protocol('WM_DELETE_WINDOW', w_brkpoint.withdraw)
-w_brkpoint_vh_reg = w_brkpoint.register(validate_hex)
-ttk.Label(w_brkpoint, text = 'Single-step mode will be activated if CSR:PC matches\nthe below. Note that only 1 breakpoint can be set.\n(please input hex bytes)', justify = 'center').pack()
-brkpoint_csr = tk.Frame(w_brkpoint); brkpoint_csr.pack(fill = 'x')
-ttk.Label(brkpoint_csr, text = 'CSR').pack(side = 'left')
-brkpoint_csr_entry = ttk.Entry(brkpoint_csr, validate = 'key', validatecommand = (w_brkpoint_vh_reg, 1, '%S', '%P', '%d')); brkpoint_csr_entry.pack(side = 'right')
-brkpoint_csr_entry.insert(0, '0')
-brkpoint_pc = tk.Frame(w_brkpoint); brkpoint_pc.pack(fill = 'x')
-ttk.Label(brkpoint_pc, text = 'PC').pack(side = 'left')
-brkpoint_pc_entry = ttk.Entry(brkpoint_pc, validate = 'key', validatecommand = (w_brkpoint_vh_reg, 4, '%S', '%P', '%d', range(0, 0xfffe, 2))); brkpoint_pc_entry.pack(side = 'right')
-ttk.Button(w_brkpoint, text = 'OK', command = set_brkpoint).pack(side = 'bottom')
-w_brkpoint.bind('<Return>', lambda x: set_brkpoint())
-w_brkpoint.bind('<Escape>', lambda x: w_brkpoint.withdraw())
-
-tk_font = tk.font.nametofont('TkDefaultFont')
-bold_italic_font = tk_font.copy()
-bold_italic_font.config(weight = 'bold', slant = 'italic')
-
-w_write = tk.Toplevel(root)
-w_write.withdraw()
-w_write.geometry('375x175')
-w_write.resizable(False, False)
-w_write.title('Write-A-Byte™')
-w_write.protocol('WM_DELETE_WINDOW', w_write.withdraw)
-w_write_vh_reg = w_write.register(validate_hex)
-ttk.Label(w_write, text = 'Write a byte to data memory, completely FREE OF CHARGE!\n(Totally) Licensed by LAPIS Semiconductor Co., Ltd.', font = bold_italic_font, justify = 'center').pack()
-ttk.Label(w_write, text = 'You have null days left before activation is required.\n(please input hex bytes)', justify = 'center').pack()
-write_csr = tk.Frame(w_write); write_csr.pack(fill = 'x')
-ttk.Label(write_csr, text = 'Segment').pack(side = 'left')
-write_csr_entry = ttk.Entry(write_csr, validate = 'key', validatecommand = (w_write_vh_reg, 2, '%S', '%P', '%d')); write_csr_entry.pack(side = 'right')
-write_csr_entry.insert(0, '0')
-write_pc = tk.Frame(w_write); write_pc.pack(fill = 'x')
-ttk.Label(write_pc, text = 'Address').pack(side = 'left')
-write_pc_entry = ttk.Entry(write_pc, validate = 'key', validatecommand = (w_write_vh_reg, 4, '%S', '%P', '%d')); write_pc_entry.pack(side = 'right')
-write_byte = tk.Frame(w_write); write_byte.pack(fill = 'x')
-ttk.Label(write_byte, text = 'Byte').pack(side = 'left')
-write_byte_entry = ttk.Entry(write_byte, validate = 'key', validatecommand = (w_write_vh_reg, 2, '%S', '%P', '%d')); write_byte_entry.pack(side = 'right')
-write_byte_entry.insert(0, '0')
-ttk.Button(w_write, text = 'OK', command = write).pack(side = 'bottom')
-w_write.bind('<Return>', lambda x: write())
-w_write.bind('<Escape>', lambda x: w_write.withdraw())
-
-w_data_mem = tk.Toplevel(root)
-w_data_mem.withdraw()
-w_data_mem.geometry(f'{config.data_mem_width}x{config.data_mem_height}')
-w_data_mem.resizable(False, False)
-w_data_mem.title('Show data memory')
-w_data_mem.protocol('WM_DELETE_WINDOW', w_data_mem.withdraw)
-
-segment_var = tk.StringVar(); segment_var.set('RAM (00:8000H - 00:8DFFH)')
-segment_cb = ttk.Combobox(w_data_mem, width = 30, textvariable = segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
-segment_cb.bind('<<ComboboxSelected>>', lambda x: get_mem(False))
-segment_cb.pack()
-
-code_frame = ttk.Frame(w_data_mem)
-code_text_sb = tk.Scrollbar(code_frame)
-code_text_sb.pack(side = 'right', fill = 'y')
-code_text = tk.Text(code_frame, font = config.data_mem_font, yscrollcommand = code_text_sb.set, wrap = 'none', state = 'disabled')
-code_text_sb.config(command = sb_yview)
-code_text.pack(fill = 'both', expand = True)
-code_frame.pack(fill = 'both', expand = True)
-
-embed_pygame = tk.Frame(root, width = config.width, height = config.height)
-embed_pygame.pack(side = 'left')
-embed_pygame.focus_set()
-
-info_label = tk.Label(root, text = 'Loading...', width = config.width, height = config.height, font = config.console_font, fg = config.console_fg, bg = config.console_bg, justify = 'left', anchor = 'nw')
-info_label.pack(side = 'left')
-
-os.environ['SDL_WINDOWID'] = str(embed_pygame.winfo_id())
-os.environ['SDL_VIDEODRIVER'] = 'windib' if os.name == 'nt' else 'x11'
-pygame.init()
-screen = pygame.display.set_mode()
-
-interface = pygame.image.load(config.interface_path)
-interface_rect = interface.get_rect()
-status_bar = pygame.image.load(config.status_bar_path)
-status_bar_rect = status_bar.get_rect()
-
-ret_val = simu8.memoryInit(ctypes.c_char_p(config.rom_file.encode()), None)
-if ret_val == 2:
-	logging.error('Unable to allocate RAM for emulated memory.')
-	sys.exit(-1)
-elif ret_val == 3:
-	logging.error(f'Cannot open the ROM file {rom_file}. If the file exists, please check the settings in config.py.')
-	sys.exit(-1)
-
-show_regs = tk.BooleanVar(value = True)
-disp_lcd = tk.BooleanVar(value = True)
-
-rc_menu = tk.Menu(root, tearoff = 0)
-rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: set_single_step(True))
-rc_menu.add_command(label = 'Resume execution (unpause)', accelerator = 'P', command = lambda: set_single_step(False))
-rc_menu.add_separator()
-rc_menu.add_command(label = 'Jump to...', accelerator = 'J', command = w_jump.deiconify)
-rc_menu.add_separator()
-rc_menu.add_command(label = 'Set breakpoint to...', accelerator = 'B', command = w_brkpoint.deiconify)
-rc_menu.add_command(label = 'Clear breakpoint', accelerator = 'N', command = clear_brkpoint)
-rc_menu.add_separator()
-rc_menu.add_command(label = 'Show data memory', accelerator = 'M', command = open_mem)
-rc_menu.add_separator()
-rc_menu.add_checkbutton(label = 'Show registers outside of single-step', accelerator = 'R', variable = show_regs)
-rc_menu.add_checkbutton(label = 'Toggle LCD/buffer display (on: LCD, off: buffer)', accelerator = 'D', variable = disp_lcd)
-rc_menu.add_separator()
-rc_menu.add_command(label = 'Reset core', accelerator = 'C', command = reset_core)
-rc_menu.add_separator()
-
-extra_funcs = tk.Menu(rc_menu, tearoff = 0)
-extra_funcs.add_command(label = 'Calculate checksum', command = calc_checksum)
-extra_funcs.add_command(label = 'Write-A-Byte™', command = w_write.deiconify)
-rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
-
-rc_menu.add_separator()
-rc_menu.add_command(label = 'Quit', accelerator = 'Q', command = exit_sim)
-
-root.bind('<Button-3>', open_popup)
-root.bind('s', lambda x: set_single_step(True)); root.bind('S', lambda x: set_single_step(True))
-root.bind('p', lambda x: set_single_step(False)); root.bind('P', lambda x: set_single_step(False))
-root.bind('j', lambda x: w_jump.deiconify()); root.bind('J', lambda x: w_jump.deiconify())
-root.bind('b', lambda x: w_brkpoint.deiconify()); root.bind('B', lambda x: w_brkpoint.deiconify())
-root.bind('n', lambda x: clear_brkpoint()); root.bind('N', lambda x: clear_brkpoint())
-root.bind('m', lambda x: open_mem()); root.bind('M', lambda x: open_mem())
-root.bind('r', lambda x: show_regs.set(not show_regs.get())); root.bind('R', lambda x: show_regs.set(not show_regs.get()))
-root.bind('d', lambda x: disp_lcd.set(not disp_lcd.get())); root.bind('D', lambda x: disp_lcd.set(not disp_lcd.get()))
-root.bind('c', lambda x: reset_core()); root.bind('C', lambda x: reset_core())
-root.bind('q', lambda x: exit_sim()); root.bind('Q', lambda x: exit_sim())
-
-single_step = ok = True
-step = False
-brkpoint = None
-clock = pygame.time.Clock()
-
-prev_csr_pc = None
-
-def pygame_loop():
-	global single_step, step, brkpoint
-
-	screen.fill((0, 0, 0))
-
-	if single_step and step: core_step()
-	if (single_step and step) or not single_step:
-		print_regs()
-		if w_data_mem.winfo_viewable(): get_mem()
-
-	clock.tick()
-
-	screen.fill((0, 0, 0))
-	screen.blit(interface, interface_rect)
+		if (disp_lcd and scr_mode in (5, 6)) or not disp_lcd:
+			for i in range(len(screen_data_status_bar)):
+				crop = config.status_bar_crops[i]
+				if screen_data_status_bar[i]: self.screen.blit(self.status_bar, (config.screen_tl_w + crop[0], config.screen_tl_h), crop)
 	
-	draw_text(f'Displaying {"LCD" if disp_lcd.get() else "buffer"}', 22, config.width // 2, 22, config.pygame_color, anchor = 'midtop')
-	scr_bytes = [read_dmem(0xf800 + i*0x10 if disp_lcd.get() else 0x87d0 + i*0xc, 0xc) for i in range(0x20)]
-	screen_data_status_bar, screen_data = get_scr_data(*scr_bytes)
+		if (disp_lcd and scr_mode == 5) or not disp_lcd:
+			for y in range(scr_range if scr_range and disp_lcd else 31):
+				for x in range(96):
+					if screen_data[y][x]: pygame.draw.rect(self.screen, (0, 0, 0), (config.screen_tl_w + x*3, config.screen_tl_h + 12 + y*3, 3, 3))
 
-	for i in range(len(screen_data_status_bar)):
-		crop = config.status_bar_crops[i]
-		if screen_data_status_bar[i]: screen.blit(status_bar, (58 + crop[0], 132), crop)
+		if self.single_step: self.step = False
+		else: self.draw_text(f'{self.clock.get_fps():.1f} FPS', 22, config.width // 2, 44, config.pygame_color, anchor = 'midtop')
 
-	for y in range(31):
-		for x in range(96):
-			if screen_data[y][x]: pygame.draw.rect(screen, (0, 0, 0), (58 + x*3, 144 + y*3, 3, 3))
+		pygame.display.update()
+		self.root.update()
+		self.root.after(0, self.pygame_loop)
 
-	if single_step: step = False
-	else: draw_text(f'{clock.get_fps():.1f} FPS', 22, config.width // 2, 44, config.pygame_color, anchor = 'midtop')
-
-	pygame.display.update()
-	root.update()
-	root.after(0, pygame_loop)
-
-reset_core()
-pygame_loop()
-
-root.bind('\\', lambda x: set_step())
-
-if os.name != 'nt': os.system('xset r off')
-root.mainloop()
+if __name__ == '__main__':
+	sim = Sim()
+	sim.run()

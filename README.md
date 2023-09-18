@@ -24,15 +24,10 @@ gcc SimU8/src/core.c SimU8/src/mmu.c -O3 -fPIC -shared -o simu8.so
 4. Run `python main.py` (or `python3 main.py`) and you're done.
 
 # Usage
-When you open the emulator, you can right-click to see the available functions of the emulator.
-These functions were originally from `testcore.c` and reimplemented in Python.
+When you open the emulator, you can right-click to see the available functions of the emulator. To step, press the backslash (`\`) key.
 
-To step, press any key (except the keys reserved for other functions). You can also hold down a key to run the emulator at a reasonable speed, though not as fast as when single-step mode is disabled.
-
-Note that when single-step mode is disabled, the screen and the memory shown in the data memory viewer may flicker.
-This is because data memory may be grabbed when SimU8's `coreStep` function is running.
-
-Also note that the frontend uses a function that doesn't exist in the main SimU8 code, and only exists in my fork. You may need to modify the frontend code if you want to use LifeEmu's SimU8 code.
+To use a custom configuration Python script, run `python main.py <module-name>` (or `python3 main.py <module-name>`).
+`<module-name>` is the name of the Python script in module name form; for example if your configuration file is in `configs/config_main.py`, then `<module-name>` will be `configs.config_main`.
 
 # Images
 This emulator uses images extracted from the ES PLUS emulators. To get them, you need to open the emulator EXE (`<model> Emulator.exe`) and DLL (`fxESPLUS_P<num>.dll`) in a program like [7-Zip](https://7-zip.org) or [Resource Hacker](http://angusj.com/resourcehacker).

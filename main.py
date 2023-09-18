@@ -426,12 +426,12 @@ class DataMem(tk.Toplevel):
 		self.deiconify()
 
 	def get_mem(self, keep_yview = True):
-		rang = (0x8000, 0xe00) if self.segment_var.get().split()[0] == 'RAM' else (0xf000, 0x1000)
+		rang = (0, 0xe00) if self.segment_var.get().split()[0] == 'RAM' else (0x7000, 0x1000)
 
 		self.code_text['state'] = 'normal'
 		yview_bak = self.code_text.yview()[0]
 		self.code_text.delete('1.0', 'end')
-		self.code_text.insert('end', self.format_mem(self.sim.read_dmem(*rang), rang[0]))
+		self.code_text.insert('end', self.format_mem(bytes((ctypes.c_byte*rang[1]).from_address(self.sim.get_var('DataMemory', ctypes.c_void_p).value)), 0x8000 + rang[0]))
 		if keep_yview: self.code_text.yview_moveto(str(yview_bak))
 		self.code_text['state'] = 'disabled'
 
@@ -518,6 +518,8 @@ class Sim:
 		self.disp_lcd = tk.BooleanVar(value = True)
 
 		self.rc_menu = tk.Menu(self.root, tearoff = 0)
+		self.rc_menu.add_command(label = 'Step (single-step only)', accelerator = '\\', command = self.set_step)
+		self.rc_menu.add_separator()
 		self.rc_menu.add_command(label = 'Enable single-step mode', accelerator = 'S', command = lambda: self.set_single_step(True))
 		self.rc_menu.add_command(label = 'Resume execution (unpause)', accelerator = 'P', command = lambda: self.set_single_step(False))
 		self.rc_menu.add_separator()
@@ -542,6 +544,7 @@ class Sim:
 		self.rc_menu.add_command(label = 'Quit', accelerator = 'Q', command = self.exit_sim)
 
 		self.root.bind('<Button-3>', self.open_popup)
+		self.root.bind('\\', lambda x: self.set_step())
 		self.bind_('s', lambda x: self.set_single_step(True))
 		self.bind_('p', lambda x: self.set_single_step(False))
 		self.bind_('j', lambda x: self.jump.deiconify())
@@ -571,8 +574,6 @@ class Sim:
 	def run(self):
 		self.reset_core()
 		self.pygame_loop()
-
-		self.root.bind('\\', lambda x: self.set_step())
 
 		if os.name != 'nt': os.system('xset r off')
 		self.root.mainloop()

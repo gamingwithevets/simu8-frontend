@@ -293,8 +293,8 @@ class Jump(tk.Toplevel):
 	def set_csr_pc(self):
 		csr_entry = self.csr_entry.get()
 		pc_entry = self.pc_entry.get()
-		self.sim.sim.core.regs.csr = int(csr_entry, 16) if csr_entry else 0
-		self.sim.sim.core.regs.pc = int(pc_entry, 16) if pc_entry else 0
+		self.sim.get_var('CSR', ctypes.c_uint8).value = int(csr_entry, 16) if csr_entry else 0
+		self.sim.get_var('PC', ctypes.c_uint16).value = int(pc_entry, 16) if pc_entry else 0
 		self.sim.print_regs()
 		self.withdraw()
 

@@ -1,4 +1,4 @@
-# Configuration file for u8_emu frontend
+# Configuration file for SimU8 frontend
 
 # Path to the shared library.
 shared_lib = 'simu8.so'

@@ -404,8 +404,8 @@ class DataMem(tk.Toplevel):
 		self.title('Show data memory')
 		self.protocol('WM_DELETE_WINDOW', self.withdraw)
 
-		self.segment_var = tk.StringVar(); self.segment_var.set('RAM (00:8000H - 00:8DFFH)')
-		self.segment_cb = ttk.Combobox(self, width = 30, textvariable = self.segment_var, values = ['RAM (00:8000H - 00:8DFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
+		self.segment_var = tk.StringVar(); self.segment_var.set('RAM (00:8000H - 00:EFFFH)')
+		self.segment_cb = ttk.Combobox(self, width = 30, textvariable = self.segment_var, values = ['RAM (00:8000H - 00:EFFFH)', 'SFRs (00:F000H - 00:FFFFH)'])
 		self.segment_cb.bind('<<ComboboxSelected>>', lambda x: self.get_mem(False))
 		self.segment_cb.pack()
 
@@ -426,7 +426,7 @@ class DataMem(tk.Toplevel):
 		self.deiconify()
 
 	def get_mem(self, keep_yview = True):
-		rang = (0, 0xe00) if self.segment_var.get().split()[0] == 'RAM' else (0x7000, 0x1000)
+		rang = (0, 0x7000) if self.segment_var.get().split()[0] == 'RAM' else (0x7000, 0x1000)
 
 		self.code_text['state'] = 'normal'
 		yview_bak = self.code_text.yview()[0]
@@ -537,7 +537,7 @@ class Sim:
 		self.rc_menu.add_separator()
 
 		extra_funcs = tk.Menu(self.rc_menu, tearoff = 0)
-		extra_funcs.add_command(label = 'Calculate checksum', command = self.calc_checksum)
+		extra_funcs.add_command(label = 'ROM info', command = self.calc_checksum)
 		extra_funcs.add_command(label = 'Write to data memory', command = self.write.deiconify)
 		self.rc_menu.add_cascade(label = 'Extra functions', menu = extra_funcs)
 		self.rc_menu.add_separator()
@@ -596,7 +596,9 @@ class Sim:
 
 		return True
 
-	def read_dmem(self, addr, num_bytes, segment = 0):
+	def read_dmem(self, addr, num_bytes, segment = 0): return self.sim.memoryGetData(ctypes.c_uint8(segment), ctypes.c_uint16(addr), ctypes.c_size_t(num_bytes))
+
+	def read_dmem_bytes(self, addr, num_bytes, segment = 0):
 		odd = addr % 2 != 0
 		if odd:
 			addr -= 1
@@ -626,11 +628,16 @@ class Sim:
 
 	def calc_checksum(self):
 		csum = 0
-		csum1 = int.from_bytes(self.read_dmem(0xfffc, 2, 1), 'little')
-		for i in range(0x10000): csum -= int.from_bytes(self.read_dmem(i, 1, 8), 'big')
-		for i in range(0xfffc): csum -= int.from_bytes(self.read_dmem(i, 1, 1), 'big')
+		version = self.read_dmem_bytes(0xfff4, 6, 1).decode()
+		rev = self.read_dmem_bytes(0xfffa, 2, 1).decode()
+		csum1 = self.read_dmem(0xfffc, 2, 1)
+		for i in range(0x10000): csum -= self.read_dmem(i, 1, 8)
+		for i in range(0xfffc): csum -= self.read_dmem(i, 1, 1)
+		
 		csum %= 0x10000
-		tk.messagebox.showinfo('Checksum', f'Expected checksum: {csum1:04X}\nCalculated checksum: {csum:04X}\n\n{"This looks like a good dump!" if csum == csum1 else "This is either a bad dump or an emulator ROM."}')
+		text = f'{version} Ver{rev}\nSUM {csum:04X} {"OK" if csum == csum1 else "NG"}'
+		
+		tk.messagebox.showinfo('ROM info', text)
 
 	def set_step(self): self.step = True
 
@@ -650,7 +657,7 @@ class Sim:
 	def keyboard(self):
 		if config.real_hardware:
 			ki = 0xff
-			ko = self.read_dmem(0xf046, 1)[0]
+			ko = self.read_dmem(0xf046, 1)
 
 			for ki_val, ko_val in self.keys_pressed:
 				if ko & (1 << ko_val): ki &= ~(1 << ki_val)
@@ -658,7 +665,7 @@ class Sim:
 			self.write_dmem(0xf040, 1, ki)
 			if len(self.keys_pressed) > 0: self.write_dmem(0xf014, 1, 2)
 		else:
-			ready = self.read_dmem(0x8e00, 1)[0]
+			ready = self.read_dmem(0x8e00, 1)
 
 			if not self.last_ready and ready:
 				self.write_dmem(0x8e01, 1, 0)
@@ -667,7 +674,7 @@ class Sim:
 			self.last_ready = ready
 
 	def sbycon(self):
-		sbycon = self.read_dmem(0xf009, 1)[0]
+		sbycon = self.read_dmem(0xf009, 1)
 
 		if sbycon == 2 and all(self.stop_accept):
 			self.stop_mode = True
@@ -676,14 +683,13 @@ class Sim:
 			self.stop_accept = [False, False]
 
 	def timer(self):
-		counter = struct.unpack("<H", self.read_dmem(0xf022, 2))[0]
-		target = struct.unpack("<H", self.read_dmem(0xf020, 2))[0]
+		counter = self.read_dmem(0xf022, 2)
+		target = self.read_dmem(0xf020, 2)
 
 		counter += 1
 		counter &= 0xffff
 
-		self.write_dmem(0xf022, 1, counter & 0xff)
-		self.write_dmem(0xf023, 1, counter >> 8)
+		self.write_dmem(0xf022, 2, counter)
 
 		if counter >= target and self.stop_mode:
 			self.stop_mode = False
@@ -710,7 +716,7 @@ class Sim:
 			if retval == 2: logging.warning(f'unimplemented instruction @ {csr:X}:{(pc - 2) & 0xffff:04X}H')
 			elif retval == 3: logging.error(f'illegal instruction @ {csr:X}:{pc:04X}H')
 
-			stpacp = self.read_dmem(0xf008, 1)[0]
+			stpacp = self.read_dmem(0xf008, 1)
 			if self.stop_accept[0]:
 				if stpacp & 0xa0 == 0xa0 and not self.stop_accept[1]: self.stop_accept[1] = True
 			elif stpacp & 0x50 == 0x50: self.stop_accept[0] = True
@@ -758,8 +764,8 @@ CSR:PC          {csr:X}:{pc:04X}H (prev. value: {self.prev_csr_pc})
 Words @ CSR:PC  ''' + ' '.join(format(self.read_cmem((pc + i*2) & 0xfffe, csr), '04X') for i in range(3)) + f'''
 Instruction     {self.decode_instruction()}
 SP              {sp:04X}H
-Words @ SP      ''' + ' '.join(format(int.from_bytes(self.read_dmem(sp + i, 2), 'little'), '04X') for i in range(0, 8, 2)) + f'''
-                ''' + ' '.join(format(int.from_bytes(self.read_dmem(sp + i, 2), 'little'), '04X') for i in range(8, 16, 2)) + f'''
+Words @ SP      ''' + ' '.join(format(self.read_dmem(sp + i, 2), '04X') for i in range(0, 8, 2)) + f'''
+                ''' + ' '.join(format(self.read_dmem(sp + i, 2), '04X') for i in range(8, 16, 2)) + f'''
 DSR:EA          {self.get_var('DSR', ctypes.c_uint8).value:02X}:{self.get_var('EA', ctypes.c_uint16).value:04X}H
 
                    C Z S OV MIE HC ELEVEL
@@ -856,11 +862,11 @@ Instructions per second  {format(self.ips, '.1f') if self.ips is not None and no
 		disp_lcd = self.disp_lcd.get()
 		self.draw_text(f'Displaying {"LCD" if disp_lcd else "buffer"}', 22, config.width // 2, 22, config.pygame_color, anchor = 'midtop')
 
-		scr_bytes = [self.read_dmem(0xf800 + i*0x10 if disp_lcd else 0x87d0 + i*0xc, 0xc) for i in range(0x20)]
+		scr_bytes = [self.read_dmem_bytes(0xf800 + i*0x10 if disp_lcd else 0x87d0 + i*0xc, 0xc) for i in range(0x20)]
 		screen_data_status_bar, screen_data = self.get_scr_data(*scr_bytes)
 		
-		scr_range = self.read_dmem(0xf030, 1)[0] & 7
-		scr_mode = self.read_dmem(0xf031, 1)[0] & 7
+		scr_range = self.read_dmem(0xf030, 1) & 7
+		scr_mode = self.read_dmem(0xf031, 1) & 7
 
 		if (disp_lcd and scr_mode in (5, 6)) or not disp_lcd:
 			for i in range(len(screen_data_status_bar)):

@@ -486,10 +486,7 @@ class Sim:
 						self.write_dmem(0x8e02, 1, 1 << k[1])
 
 		def release_cb(event):
-			if config.real_hardware: 
-				for k, v in config.keymap.items():
-					if event.type == tk.EventType.KeyRelease and event.keysym.lower() in v[1:] and k is not None and k in self.keys_pressed: self.keys_pressed.remove(k)
-					elif event.type == tk.EventType.ButtonRelease: self.keys_pressed.clear()
+			if config.real_hardware: self.keys_pressed.clear()
 			else:
 				self.write_dmem(0x8e01, 1, 0)
 				self.write_dmem(0x8e02, 1, 0)
